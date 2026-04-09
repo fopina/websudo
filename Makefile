@@ -1,4 +1,4 @@
-projectname?=golang-template
+projectname?=websudo
 
 default: help
 
@@ -8,34 +8,34 @@ help: ## list makefile targets
 
 .PHONY: build
 build: ## build golang binary
-	@go build -ldflags "-X main.version=$(shell git describe --abbrev=0 --tags)" -o $(projectname)
+	@go build -ldflags "-X main.version=$(shell git describe --abbrev=0 --tags 2>/dev/null || echo dev)" -o $(projectname)
 
 .PHONY: install
 install: ## install golang binary
-	@go install -ldflags "-X main.version=$(shell git describe --abbrev=0 --tags)"
+	@go install -ldflags "-X main.version=$(shell git describe --abbrev=0 --tags 2>/dev/null || echo dev)"
 
 .PHONY: run
 run: ## run the app
-	@go run -ldflags "-X main.version=$(shell git describe --abbrev=0 --tags)"  main.go
+	@go run -ldflags "-X main.version=$(shell git describe --abbrev=0 --tags 2>/dev/null || echo dev)" main.go serve --config config/websudo.yaml
 
 .PHONY: bootstrap
 bootstrap: ## install build deps
 	go generate -tags tools tools/tools.go
 
-PHONY: test
+.PHONY: test
 test: clean ## display test coverage
 	go test --cover -parallel=1 -v -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | sort -rnk3
-	
-PHONY: clean
+
+.PHONY: clean
 clean: ## clean up environment
 	@rm -rf coverage.out dist/ $(projectname)
 
-PHONY: cover
+.PHONY: race
 race: ## display test coverage with race
-	go test -v -race $(shell go list ./... | grep -v /vendor/) -v -coverprofile=coverage.out
+	go test -v -race $(shell go list ./... | grep -v /vendor/) -coverprofile=coverage.out
 	go tool cover -func=coverage.out
 
-PHONY: snapshot
+.PHONY: snapshot
 snapshot: ## goreleaser snapshot
 	goreleaser release --snapshot --clean

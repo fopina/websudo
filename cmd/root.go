@@ -8,16 +8,16 @@ import (
 
 func newRootCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
-		// TODO: update name
-		Use:   "golang-template",
-		Short: "golang project template demo application",
+		Use:   "websudo",
+		Short: "Policy-aware reverse proxy for controlled access to web services",
+		Long:  "websudo is a policy-aware reverse proxy that brokers scoped access to web services without exposing real credentials.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 
-	cmd.AddCommand(newVersionCmd(version)) // version subcommand
-	cmd.AddCommand(newExampleCmd())        // example subcommand
+	cmd.AddCommand(newVersionCmd(version))
+	cmd.AddCommand(newServeCmd())
 
 	return cmd
 }

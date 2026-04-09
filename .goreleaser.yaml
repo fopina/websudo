@@ -3,14 +3,11 @@ version: 2
 before:
   hooks:
     - go mod tidy
-    # TODO: you may remove this if you don't need go generate
-    - go generate ./...
 
 builds:
   - env:
       - CGO_ENABLED=0
-    # TODO: customize binary name if not the same as repository
-    # binary: golang-template
+    binary: websudo
     ldflags: -s -w -X main.version={{ .Version }}
     goos:
       - linux
@@ -22,7 +19,6 @@ builds:
 
 archives:
   - formats: tar.gz
-    # use zip for windows archives
     format_overrides:
       - goos: windows
         formats: zip
@@ -35,7 +31,6 @@ changelog:
       - "^test:"
 
 dockers_v2:
-  # TODO: make sure {{.ProjectName}} is the right github repository
   - images:
       - ghcr.io/fopina/{{.ProjectName}}
     tags:
