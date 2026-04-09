@@ -23,11 +23,15 @@ func newServeCmd() *cobra.Command {
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "loaded config for %d services\n", len(cfg.Services))
+			if dryRun, _ := cmd.Flags().GetBool("dry-run"); dryRun {
+				return nil
+			}
 			return server.New(cfg).Run(cmd.Context())
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "config/websudo.yaml", "Path to the websudo config file")
+	cmd.Flags().Bool("dry-run", false, "Validate config and exit without starting the server")
 
 	return cmd
 }

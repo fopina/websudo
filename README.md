@@ -7,15 +7,17 @@
 [![test](https://github.com/fopina/websudo/actions/workflows/test.yml/badge.svg)](https://github.com/fopina/websudo/actions/workflows/test.yml)
 [![codecov](https://codecov.io/github/fopina/websudo/graph/badge.svg)](https://codecov.io/github/fopina/websudo)
 
-**websudo** is a policy-aware reverse proxy that brokers scoped access to web services without exposing real credentials.
+**websudo** is a policy-aware proxy that validates placeholder credentials and swaps them for real upstream credentials at the boundary.
 
 ## Status
 
-This repository is initialized from the Go template and now contains the first project-specific scaffold:
-- `serve` command
-- YAML config loading
-- sample service policy config
-- placeholder server runtime for the proxy implementation
+Current v1 scaffold includes:
+- proxy runtime built on `goproxy`
+- host-based service matching
+- method/path policy checks
+- placeholder credential validation
+- upstream credential injection from environment variables
+- unit tests for credential validation and replacement
 
 ## Usage
 
@@ -31,34 +33,33 @@ listen: 127.0.0.1:8080
 
 services:
   github:
+    match_host: api.github.com
     base_url: https://api.github.com
+    placeholder_auth: Authorization
+    require_placeholder_prefix: "Bearer ph_"
+    inject_auth: env:GITHUB_TOKEN
     allowed_methods: [GET, POST]
     allowed_paths:
       - /user
       - /repos/*
     denied_paths:
       - /user/emails
-    headers_allow: [Accept, Content-Type, User-Agent]
-    inject_auth: env:GITHUB_TOKEN
 ```
+
+## Validation covered by tests
+
+- requests without placeholder credentials are rejected
+- requests with non-placeholder credentials are rejected
+- valid placeholder credentials are replaced with the configured upstream credentials
+- unknown hosts are rejected
 
 ## Next steps
 
-- implement request routing and upstream proxying
-- enforce method/path policy checks
-- inject scoped upstream authentication
-- add audit logging and response redaction
-- add integration tests around proxy behavior
+- tighten request header forwarding rules
+- add structured audit records for allow/deny decisions
+- add integration tests against a live upstream test server
+- refine config for multiple credential strategies
 
 ## Build
 
 Check out [CONTRIBUTING.md](CONTRIBUTING.md)
-
-### Makefile targets
-
-```sh
-make
-make build
-make test
-make snapshot
-```

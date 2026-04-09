@@ -2,7 +2,11 @@ listen: 127.0.0.1:8080
 
 services:
   github:
+    match_host: api.github.com
     base_url: https://api.github.com
+    placeholder_auth: Authorization
+    require_placeholder_prefix: "Bearer ph_"
+    inject_auth: env:GITHUB_TOKEN
     allowed_methods:
       - GET
       - POST
@@ -15,4 +19,3 @@ services:
       - Accept
       - Content-Type
       - User-Agent
-    inject_auth: env:GITHUB_TOKEN
