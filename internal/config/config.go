@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,12 +16,28 @@ type Config struct {
 
 // Service describes one upstream service and its policy.
 type Service struct {
-	BaseURL        string   `yaml:"base_url"`
-	AllowedMethods []string `yaml:"allowed_methods"`
-	AllowedPaths   []string `yaml:"allowed_paths"`
-	DeniedPaths    []string `yaml:"denied_paths"`
-	HeadersAllow   []string `yaml:"headers_allow"`
-	InjectAuth     string   `yaml:"inject_auth"`
+	BaseURL                  string    `yaml:"base_url"`
+	MatchHost                string    `yaml:"match_host"`
+	RoutePrefix              string    `yaml:"route_prefix"`
+	AllowedMethods           []string  `yaml:"allowed_methods"`
+	AllowedPaths             []string  `yaml:"allowed_paths"`
+	DeniedPaths              []string  `yaml:"denied_paths"`
+	HeadersAllow             []string  `yaml:"headers_allow"`
+	PlaceholderAuth          string    `yaml:"placeholder_auth"`
+	InjectAuth               string    `yaml:"inject_auth"`
+	RequirePlaceholderPrefix string    `yaml:"require_placeholder_prefix"`
+	Variants                 []Variant `yaml:"variants"`
+}
+
+// Variant is a placeholder-token-specific override for a service.
+type Variant struct {
+	Name                     string   `yaml:"name"`
+	PlaceholderContains      string   `yaml:"placeholder_contains"`
+	AllowedMethods           []string `yaml:"allowed_methods"`
+	AllowedPaths             []string `yaml:"allowed_paths"`
+	DeniedPaths              []string `yaml:"denied_paths"`
+	InjectAuth               string   `yaml:"inject_auth"`
+	RequirePlaceholderPrefix string   `yaml:"require_placeholder_prefix"`
 }
 
 // Load reads and validates configuration from disk.
@@ -43,10 +60,97 @@ func Load(path string) (*Config, error) {
 	}
 
 	for name, svc := range cfg.Services {
-		if svc.BaseURL == "" {
-			return nil, fmt.Errorf("service %q is missing base_url", name)
+		normalized, err := normalizeService(name, svc)
+		if err != nil {
+			return nil, err
 		}
+		cfg.Services[name] = normalized
 	}
 
 	return &cfg, nil
+}
+
+func normalizeService(name string, svc Service) (Service, error) {
+	if svc.BaseURL == "" {
+		return Service{}, fmt.Errorf("service %q is missing base_url", name)
+	}
+	if svc.MatchHost == "" && svc.RoutePrefix == "" {
+		return Service{}, fmt.Errorf("service %q must define either match_host or route_prefix", name)
+	}
+	if svc.PlaceholderAuth == "" {
+		return Service{}, fmt.Errorf("service %q is missing placeholder_auth", name)
+	}
+	if svc.InjectAuth == "" {
+		return Service{}, fmt.Errorf("service %q is missing inject_auth", name)
+	}
+	if svc.RequirePlaceholderPrefix == "" {
+		svc.RequirePlaceholderPrefix = "Bearer ph_"
+	}
+	if svc.RoutePrefix != "" && !strings.HasPrefix(svc.RoutePrefix, "/") {
+		svc.RoutePrefix = "/" + svc.RoutePrefix
+	}
+
+	for i, variant := range svc.Variants {
+		if variant.Name == "" {
+			return Service{}, fmt.Errorf("service %q variant %d is missing name", name, i)
+		}
+		if variant.PlaceholderContains == "" {
+			return Service{}, fmt.Errorf("service %q variant %q is missing placeholder_contains", name, variant.Name)
+		}
+		if variant.InjectAuth == "" {
+			variant.InjectAuth = svc.InjectAuth
+		}
+		if variant.RequirePlaceholderPrefix == "" {
+			variant.RequirePlaceholderPrefix = svc.RequirePlaceholderPrefix
+		}
+		svc.Variants[i] = variant
+	}
+
+	return svc, nil
+}
+
+// EffectiveService returns the base service merged with the matching variant, if any.
+func (s Service) EffectiveService(placeholder string) (Service, string) {
+	for _, variant := range s.Variants {
+		if strings.Contains(placeholder, variant.PlaceholderContains) {
+			effective := s
+			effective.AllowedMethods = chooseStrings(variant.AllowedMethods, s.AllowedMethods)
+			effective.AllowedPaths = chooseStrings(variant.AllowedPaths, s.AllowedPaths)
+			effective.DeniedPaths = chooseStrings(variant.DeniedPaths, s.DeniedPaths)
+			effective.InjectAuth = chooseString(variant.InjectAuth, s.InjectAuth)
+			effective.RequirePlaceholderPrefix = chooseString(variant.RequirePlaceholderPrefix, s.RequirePlaceholderPrefix)
+			return effective, variant.Name
+		}
+	}
+
+	return s, ""
+}
+
+// InjectedAuthValue resolves the upstream auth value from env:VAR references.
+func (s Service) InjectedAuthValue() (string, error) {
+	const envPrefix = "env:"
+	if !strings.HasPrefix(s.InjectAuth, envPrefix) {
+		return "", fmt.Errorf("unsupported inject_auth source %q", s.InjectAuth)
+	}
+
+	value := os.Getenv(strings.TrimPrefix(s.InjectAuth, envPrefix))
+	if value == "" {
+		return "", fmt.Errorf("inject_auth source %q resolved empty value", s.InjectAuth)
+	}
+
+	return value, nil
+}
+
+func chooseString(primary string, fallback string) string {
+	if primary != "" {
+		return primary
+	}
+	return fallback
+}
+
+func chooseStrings(primary []string, fallback []string) []string {
+	if len(primary) > 0 {
+		return primary
+	}
+	return fallback
 }

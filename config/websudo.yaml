@@ -1,18 +1,46 @@
 listen: 127.0.0.1:8080
 
 services:
-  github:
+  github-forward:
+    match_host: api.github.com
     base_url: https://api.github.com
+    placeholder_auth: Authorization
+    require_placeholder_prefix: "Bearer ph_"
+    inject_auth: env:GITHUB_TOKEN
     allowed_methods:
       - GET
       - POST
     allowed_paths:
       - /user
-      - /repos/*
     denied_paths:
       - /user/emails
     headers_allow:
       - Accept
       - Content-Type
       - User-Agent
+    variants:
+      - name: repo-write
+        placeholder_contains: repo_write
+        inject_auth: env:GITHUB_REPO_TOKEN
+        allowed_paths:
+          - /repos/*/*
+
+  github-reverse:
+    route_prefix: /github
+    base_url: https://api.github.com
+    placeholder_auth: Authorization
+    require_placeholder_prefix: "Bearer ph_"
     inject_auth: env:GITHUB_TOKEN
+    allowed_methods:
+      - GET
+      - POST
+    allowed_paths:
+      - /user
+    variants:
+      - name: admin
+        placeholder_contains: admin
+        inject_auth: env:GITHUB_ADMIN_TOKEN
+        allowed_paths:
+          - /user
+          - /repos/*/*
+          - /orgs/*
