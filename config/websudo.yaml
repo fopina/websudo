@@ -1,0 +1,18 @@
+listen: 127.0.0.1:8080
+
+services:
+  github:
+    base_url: https://api.github.com
+    allowed_methods:
+      - GET
+      - POST
+    allowed_paths:
+      - /user
+      - /repos/*
+    denied_paths:
+      - /user/emails
+    headers_allow:
+      - Accept
+      - Content-Type
+      - User-Agent
+    inject_auth: env:GITHUB_TOKEN

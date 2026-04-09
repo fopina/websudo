@@ -14,6 +14,8 @@ func TestRootCommandOutput(t *testing.T) {
 	cmd.SetArgs([]string{"-h"})
 	cmd.SetOut(b)
 
-	cmdErr := cmd.RunE(cmd, nil)
-	require.NoError(t, cmdErr)
+	err := cmd.Execute()
+	require.NoError(t, err)
+	require.Contains(t, b.String(), "websudo")
+	require.Contains(t, b.String(), "serve")
 }
