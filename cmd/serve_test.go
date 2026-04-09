@@ -27,6 +27,8 @@ func writeTestConfig(t *testing.T) string {
 	configPath := filepath.Join(tmpDir, "websudo.yaml")
 
 	err := os.WriteFile(configPath, []byte(`listen: 127.0.0.1:0
+tls:
+  generate_on_boot: true
 services:
   github:
     match_host: api.github.com
@@ -97,6 +99,9 @@ func TestServeCommandRejectsExtraArgs(t *testing.T) {
 
 func TestServeCommandStartsServerWithoutTestFlag(t *testing.T) {
 	configPath := writeTestConfig(t)
+	caDir := t.TempDir()
+	caCertPath := filepath.Join(caDir, "custom-ca.pem")
+	caKeyPath := filepath.Join(caDir, "custom-ca-key.pem")
 
 	originalNewServer := newServer
 	defer func() { newServer = originalNewServer }()
@@ -104,6 +109,10 @@ func TestServeCommandStartsServerWithoutTestFlag(t *testing.T) {
 	called := false
 	newServer = func(cfg *config.Config) runnableServer {
 		require.Equal(t, "127.0.0.1:0", cfg.Listen)
+		require.Equal(t, caCertPath, cfg.TLS.CAcertPath)
+		require.Equal(t, caKeyPath, cfg.TLS.CAkeyPath)
+		require.FileExists(t, cfg.TLS.CAcertPath)
+		require.FileExists(t, cfg.TLS.CAkeyPath)
 		return stubServer{run: func(context.Context) error {
 			called = true
 			return nil
@@ -113,7 +122,7 @@ func TestServeCommandStartsServerWithoutTestFlag(t *testing.T) {
 	cmd := newServeCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--config", configPath})
+	cmd.SetArgs([]string{"--config", configPath, "--ca-cert", caCertPath, "--ca-key", caKeyPath})
 
 	err := cmd.Execute()
 	require.NoError(t, err)
@@ -140,4 +149,34 @@ func TestServeCommandPropagatesServerError(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	require.ErrorContains(t, err, "boom")
+}
+
+func TestServeCommandFailsWhenTLSAssetsMissingAndAutogenDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "websudo.yaml")
+	missingDir := filepath.Join(tmpDir, "missing")
+	missingCertPath := filepath.Join(missingDir, "missing-cert.pem")
+	missingKeyPath := filepath.Join(missingDir, "missing-key.pem")
+
+	err := os.WriteFile(configPath, []byte(`listen: 127.0.0.1:0
+tls:
+  generate_on_boot: false
+services:
+  github:
+    match_host: api.github.com
+    base_url: https://api.github.com
+    placeholder_auth: Authorization
+    inject_auth: env:GITHUB_TOKEN
+`), 0o600)
+	require.NoError(t, err)
+	t.Setenv("GITHUB_TOKEN", "Bearer live_token")
+
+	cmd := newServeCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--config", configPath, "--ca-cert", missingCertPath, "--ca-key", missingKeyPath, "-t"})
+
+	err = cmd.Execute()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "CA files are missing")
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -11,7 +12,16 @@ import (
 // Config is the top-level websudo configuration.
 type Config struct {
 	Listen   string             `yaml:"listen"`
+	TLS      TLSConfig          `yaml:"tls"`
 	Services map[string]Service `yaml:"services"`
+}
+
+// TLSConfig controls CA storage and TLS handling.
+type TLSConfig struct {
+	CAcertPath        string `yaml:"ca_cert_path"`
+	CAkeyPath         string `yaml:"ca_key_path"`
+	GenerateOnBoot    bool   `yaml:"generate_on_boot"`
+	GenerateOnBootSet bool   `yaml:"-"`
 }
 
 // Service describes one upstream service and its policy.
@@ -51,10 +61,12 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("decode config %q: %w", path, err)
 	}
+	cfg.TLS.GenerateOnBootSet = strings.Contains(string(data), "generate_on_boot:")
 
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
 	}
+	cfg.TLS = normalizeTLSConfig(cfg.TLS)
 	if len(cfg.Services) == 0 {
 		return nil, fmt.Errorf("config %q defines no services", path)
 	}
@@ -68,6 +80,20 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func normalizeTLSConfig(tls TLSConfig) TLSConfig {
+	baseDir := filepath.Join(userHomeDir(), ".local", "share", "websudo")
+	if tls.CAcertPath == "" {
+		tls.CAcertPath = filepath.Join(baseDir, "ca.pem")
+	}
+	if tls.CAkeyPath == "" {
+		tls.CAkeyPath = filepath.Join(baseDir, "ca-key.pem")
+	}
+	if !tls.GenerateOnBootSet {
+		tls.GenerateOnBoot = true
+	}
+	return tls
 }
 
 func normalizeService(name string, svc Service) (Service, error) {
@@ -153,4 +179,12 @@ func chooseStrings(primary []string, fallback []string) []string {
 		return primary
 	}
 	return fallback
+}
+
+func userHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "."
+	}
+	return home
 }

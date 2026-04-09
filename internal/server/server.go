@@ -36,6 +36,11 @@ func New(cfg *config.Config) *Server {
 func NewWithLogger(cfg *config.Config, logger *slog.Logger) *Server {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = false
+	if cfg.TLS.CAcertPath != "" && cfg.TLS.CAkeyPath != "" {
+		if err := applyTLSConfig(proxy, cfg); err != nil {
+			panic(err)
+		}
+	}
 
 	s := &Server{
 		cfg:    cfg,

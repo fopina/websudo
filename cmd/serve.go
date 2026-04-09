@@ -19,6 +19,8 @@ var newServer = func(cfg *config.Config) runnableServer {
 
 func newServeCmd() *cobra.Command {
 	var configPath string
+	var caCertPath string
+	var caKeyPath string
 
 	cmd := &cobra.Command{
 		Use:          "serve",
@@ -28,6 +30,15 @@ func newServeCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configPath)
 			if err != nil {
+				return err
+			}
+			if caCertPath != "" {
+				cfg.TLS.CAcertPath = caCertPath
+			}
+			if caKeyPath != "" {
+				cfg.TLS.CAkeyPath = caKeyPath
+			}
+			if err := config.EnsureTLSAssets(cmd.Context(), cfg); err != nil {
 				return err
 			}
 
@@ -40,6 +51,8 @@ func newServeCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "config/websudo.yaml", "Path to the websudo config file")
+	cmd.Flags().StringVar(&caCertPath, "ca-cert", "", "Path to the TLS CA certificate file")
+	cmd.Flags().StringVar(&caKeyPath, "ca-key", "", "Path to the TLS CA private key file")
 	cmd.Flags().BoolP("test", "t", false, "Test configuration and exit")
 
 	return cmd
