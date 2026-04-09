@@ -20,6 +20,13 @@ type Server struct {
 	httpServer *http.Server
 }
 
+type matchedRoute struct {
+	serviceName string
+	variantName string
+	service     config.Service
+	path        string
+}
+
 // New creates a server from config.
 func New(cfg *config.Config) *Server {
 	return NewWithLogger(cfg, slog.Default())
@@ -60,24 +67,28 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-	serviceName, svc, err := s.matchService(req)
+	matched, err := s.matchRoute(req)
 	if err != nil {
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
 	}
 
-	if err := validateRequest(req, svc); err != nil {
-		s.logger.Warn("request denied", "service", serviceName, "host", req.URL.Host, "path", req.URL.Path, "error", err)
+	if matched.path != req.URL.Path {
+		req.URL.Path = matched.path
+	}
+
+	if err := validateRequest(req, matched.service); err != nil {
+		s.logger.Warn("request denied", "service", matched.serviceName, "variant", matched.variantName, "host", req.URL.Host, "path", req.URL.Path, "error", err)
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
 	}
 
-	upstreamAuth, err := svc.InjectedAuthValue()
+	upstreamAuth, err := matched.service.InjectedAuthValue()
 	if err != nil {
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
 	}
 
-	targetURL, err := url.Parse(svc.BaseURL)
+	targetURL, err := url.Parse(matched.service.BaseURL)
 	if err != nil {
-		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, fmt.Sprintf("invalid base_url for %s", serviceName))
+		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, fmt.Sprintf("invalid base_url for %s", matched.serviceName))
 	}
 
 	req.URL.Scheme = targetURL.Scheme
@@ -85,29 +96,45 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 	req.Host = targetURL.Host
 	req.URL.Path = joinURLPath(targetURL.Path, req.URL.Path)
 	req.RequestURI = ""
-	req.Header.Set(svc.PlaceholderAuth, upstreamAuth)
+	req.Header.Set(matched.service.PlaceholderAuth, upstreamAuth)
 
-	ctx.UserData = serviceName
-	s.logger.Info("request allowed", "service", serviceName, "method", req.Method, "path", req.URL.Path)
+	ctx.UserData = map[string]string{"service": matched.serviceName, "variant": matched.variantName}
+	s.logger.Info("request allowed", "service", matched.serviceName, "variant", matched.variantName, "method", req.Method, "path", req.URL.Path)
 	return req, nil
 }
 
 func (s *Server) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 	if resp != nil && ctx != nil && ctx.UserData != nil {
-		s.logger.Info("response proxied", "service", ctx.UserData)
+		s.logger.Info("response proxied", "route", ctx.UserData)
 	}
 	return resp
 }
 
-func (s *Server) matchService(req *http.Request) (string, config.Service, error) {
-	host := req.URL.Hostname()
+func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
 	for name, svc := range s.cfg.Services {
-		if strings.EqualFold(host, svc.MatchHost) {
-			return name, svc, nil
+		if svc.RoutePrefix != "" && strings.HasPrefix(req.URL.Path, svc.RoutePrefix) {
+			placeholder := req.Header.Get(svc.PlaceholderAuth)
+			effective, variantName := svc.EffectiveService(placeholder)
+			trimmedPath := strings.TrimPrefix(req.URL.Path, svc.RoutePrefix)
+			if trimmedPath == "" {
+				trimmedPath = "/"
+			}
+			return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: trimmedPath}, nil
 		}
 	}
 
-	return "", config.Service{}, fmt.Errorf("no configured service matches host %q", host)
+	host := req.URL.Hostname()
+	for name, svc := range s.cfg.Services {
+		if !strings.EqualFold(host, svc.MatchHost) {
+			continue
+		}
+
+		placeholder := req.Header.Get(svc.PlaceholderAuth)
+		effective, variantName := svc.EffectiveService(placeholder)
+		return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: req.URL.Path}, nil
+	}
+
+	return matchedRoute{}, fmt.Errorf("no configured service matches request host %q or path %q", host, req.URL.Path)
 }
 
 func validateRequest(req *http.Request, svc config.Service) error {

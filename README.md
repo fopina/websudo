@@ -13,11 +13,13 @@
 
 Current v1 scaffold includes:
 - proxy runtime built on `goproxy`
-- host-based service matching
+- forward proxy mode using hostname matching
+- reverse proxy mode using explicit local route prefixes
 - method/path policy checks
 - placeholder credential validation
 - upstream credential injection from environment variables
-- unit tests for credential validation and replacement
+- per-placeholder-token variants for the same host or route
+- unit tests for credential validation, forward mode, reverse mode, and credential replacement
 
 ## Usage
 
@@ -26,13 +28,26 @@ websudo serve --config config/websudo.yaml
 websudo version
 ```
 
-## Example configuration
+## Configuration model
+
+Each service can define one or both of:
+- `match_host`: for forward proxy requests, matched by requested hostname
+- `route_prefix`: for reverse proxy requests, matched by local path prefix such as `/github`
+
+Both modes use the same:
+- `placeholder_auth`
+- `require_placeholder_prefix`
+- `inject_auth`
+- `allowed_methods`
+- `allowed_paths`
+- `denied_paths`
+- `variants`
+
+## Example: forward proxy by hostname
 
 ```yaml
-listen: 127.0.0.1:8080
-
 services:
-  github:
+  github-forward:
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -41,17 +56,55 @@ services:
     allowed_methods: [GET, POST]
     allowed_paths:
       - /user
-      - /repos/*
-    denied_paths:
-      - /user/emails
+    variants:
+      - name: repo-write
+        placeholder_contains: repo_write
+        inject_auth: env:GITHUB_REPO_TOKEN
+        allowed_paths:
+          - /repos/*/*
 ```
+
+Behavior:
+- request to `https://api.github.com/user` with `Authorization: Bearer ph_demo` uses base policy
+- request to `https://api.github.com/repos/fopina/websudo` with `Authorization: Bearer ph_repo_write_123` uses the `repo-write` variant
+
+## Example: reverse proxy by local route
+
+```yaml
+services:
+  github-reverse:
+    route_prefix: /github
+    base_url: https://api.github.com
+    placeholder_auth: Authorization
+    require_placeholder_prefix: "Bearer ph_"
+    inject_auth: env:GITHUB_TOKEN
+    allowed_methods: [GET, POST]
+    allowed_paths:
+      - /user
+    variants:
+      - name: admin
+        placeholder_contains: admin
+        inject_auth: env:GITHUB_ADMIN_TOKEN
+        allowed_paths:
+          - /user
+          - /repos/*/*
+          - /orgs/*
+```
+
+Behavior:
+- request to `/github/user` maps to upstream `/user`
+- request to `/github/repos/fopina/websudo` only works when the placeholder token selects a variant that allows that path
 
 ## Validation covered by tests
 
 - requests without placeholder credentials are rejected
 - requests with non-placeholder credentials are rejected
+- forward proxy requests are matched by hostname and rewritten to the configured upstream
+- reverse proxy requests are matched by route prefix and rewritten to the configured upstream
 - valid placeholder credentials are replaced with the configured upstream credentials
-- unknown hosts are rejected
+- unknown hosts and unknown routes are rejected
+- placeholder token variants can select different allowed paths and injected credentials for the same service
+- reverse mode also honors variant-specific path and credential overrides
 
 ## Next steps
 

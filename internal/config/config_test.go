@@ -15,12 +15,18 @@ func TestLoad(t *testing.T) {
 	err := os.WriteFile(path, []byte(`services:
   github:
     match_host: api.github.com
+    route_prefix: /github
     base_url: https://api.github.com
     placeholder_auth: Authorization
     inject_auth: env:GITHUB_TOKEN
     allowed_methods: [GET]
     allowed_paths:
       - /user
+    variants:
+      - name: repo-write
+        placeholder_contains: repo_write
+        allowed_paths:
+          - /repos/*/*
 `), 0o600)
 	require.NoError(t, err)
 
@@ -29,6 +35,8 @@ func TestLoad(t *testing.T) {
 	require.Equal(t, "127.0.0.1:8080", cfg.Listen)
 	require.Contains(t, cfg.Services, "github")
 	require.Equal(t, "Bearer ph_", cfg.Services["github"].RequirePlaceholderPrefix)
+	require.Equal(t, "/github", cfg.Services["github"].RoutePrefix)
+	require.Len(t, cfg.Services["github"].Variants, 1)
 }
 
 func TestInjectedAuthValue(t *testing.T) {
@@ -37,4 +45,23 @@ func TestInjectedAuthValue(t *testing.T) {
 	value, err := Service{InjectAuth: "env:GITHUB_TOKEN"}.InjectedAuthValue()
 	require.NoError(t, err)
 	require.Equal(t, "Bearer live_token", value)
+}
+
+func TestEffectiveServiceVariantOverride(t *testing.T) {
+	service := Service{
+		AllowedPaths:             []string{"/user"},
+		InjectAuth:               "env:BASE_TOKEN",
+		RequirePlaceholderPrefix: "Bearer ph_",
+		Variants: []Variant{{
+			Name:                "repo-write",
+			PlaceholderContains: "repo_write",
+			AllowedPaths:        []string{"/repos/*/*"},
+			InjectAuth:          "env:REPO_TOKEN",
+		}},
+	}
+
+	effective, variantName := service.EffectiveService("Bearer ph_repo_write_123")
+	require.Equal(t, "repo-write", variantName)
+	require.Equal(t, []string{"/repos/*/*"}, effective.AllowedPaths)
+	require.Equal(t, "env:REPO_TOKEN", effective.InjectAuth)
 }
