@@ -1,5 +1,10 @@
 listen: 127.0.0.1:8080
 
+tls:
+  generate_on_boot: true
+  ca_cert_path: ~/.local/share/websudo/ca.pem
+  ca_key_path: ~/.local/share/websudo/ca-key.pem
+
 services:
   github-forward:
     match_host: api.github.com
