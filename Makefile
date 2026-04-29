@@ -27,6 +27,10 @@ test: clean ## display test coverage
 	go test --cover -parallel=1 -v -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | sort -rnk3
 
+.PHONY: e2e
+e2e: ## run end-to-end tests
+	python3 tests/e2e/github_issues.py
+
 .PHONY: clean
 clean: ## clean up environment
 	@rm -rf coverage.out dist/ $(projectname)

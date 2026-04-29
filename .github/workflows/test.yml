@@ -27,7 +27,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
         with:
-          flags: unittests
+          flags: unit
           # TODO: tokenless only works if Codecov app is installed (in the account or org) and set up in settings - https://app.codecov.io/account/gh/fopina/org-upload-token "Token authentication" -> "Not Required"
           # token: ${{ secrets.CODECOV_TOKEN }}
           # TODO: slug is required if using GLOBAL token inside an *org* - never applies to personal repositories
