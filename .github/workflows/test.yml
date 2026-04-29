@@ -25,7 +25,7 @@ jobs:
         run: go test -race -coverprofile="coverage.out" -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           flags: unittests
           # TODO: tokenless only works if Codecov app is installed (in the account or org) and set up in settings - https://app.codecov.io/account/gh/fopina/org-upload-token "Token authentication" -> "Not Required"
