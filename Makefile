@@ -29,7 +29,7 @@ test: clean ## display test coverage
 
 .PHONY: e2e
 e2e: ## run end-to-end tests
-	python3 tests/e2e/github_issues.py
+	./tests/e2e/github_issues.py
 
 .PHONY: clean
 clean: ## clean up environment
