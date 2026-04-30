@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -43,6 +44,41 @@ func TestHandleResponseReturnsResponse(t *testing.T) {
 	resp := &http.Response{StatusCode: http.StatusOK}
 	out := srv.handleResponse(resp, nil)
 	require.Same(t, resp, out)
+}
+
+func TestNonProxyHandlerServesReverseProxyRoute(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "Bearer live_token")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "/api/user", req.URL.Path)
+		require.Equal(t, "Bearer live_token", req.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	srv := NewWithLogger(&config.Config{
+		Services: map[string]config.Service{
+			"github": {
+				RoutePrefix:              "/github",
+				BaseURL:                  upstream.URL + "/api",
+				PlaceholderAuth:          "Authorization",
+				InjectAuth:               "env:GITHUB_TOKEN",
+				RequirePlaceholderPrefix: "Bearer ph_",
+				AllowedMethods:           []string{http.MethodGet},
+				AllowedPaths:             []string{"/user"},
+			},
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	req := httptest.NewRequest(http.MethodGet, "http://websudo.local/github/user", nil)
+	req.Header.Set("Authorization", "Bearer ph_demo")
+	rec := httptest.NewRecorder()
+
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"ok":true}`, rec.Body.String())
 }
 
 func TestRunReturnsServerErrors(t *testing.T) {

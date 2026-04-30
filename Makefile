@@ -29,7 +29,16 @@ test: clean ## display test coverage
 
 .PHONY: e2e
 e2e: ## run end-to-end tests
+ifdef WEBSUDO_E2E_COVERAGE_OUT
+	WEBSUDO_E2E_COVERAGE_OUT=$(WEBSUDO_E2E_COVERAGE_OUT).forward ./tests/e2e/test_forward_proxy.py
+	WEBSUDO_E2E_COVERAGE_OUT=$(WEBSUDO_E2E_COVERAGE_OUT).reverse ./tests/e2e/test_reverse_proxy.py
+	@if [ -f "$(WEBSUDO_E2E_COVERAGE_OUT).forward" ] && [ -f "$(WEBSUDO_E2E_COVERAGE_OUT).reverse" ]; then \
+		awk 'FNR == 1 && NR != 1 { next } { print }' $(WEBSUDO_E2E_COVERAGE_OUT).forward $(WEBSUDO_E2E_COVERAGE_OUT).reverse > $(WEBSUDO_E2E_COVERAGE_OUT); \
+	fi
+else
 	./tests/e2e/test_forward_proxy.py
+	./tests/e2e/test_reverse_proxy.py
+endif
 
 .PHONY: clean
 clean: ## clean up environment
