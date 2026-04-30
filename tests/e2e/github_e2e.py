@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import json
 import os
 import shutil
@@ -14,7 +12,7 @@ from pathlib import Path
 
 PLACEHOLDER_ALLOW_ALL = "Bearer ph_allow_all"
 PLACEHOLDER_BLOCK_ISSUE_2 = "Bearer ph_block_issue_2"
-CONFIG_TEMPLATE = Path(__file__).with_name("github_issues.websudo.template.yaml")
+GITHUB_API = "https://api.github.com"
 AUTH_CHECKS = [
     {
         "name": "installation-repositories",
@@ -34,7 +32,9 @@ AUTH_CHECKS = [
 ]
 
 
-class GitHubIssuesE2ETest(unittest.TestCase):
+class GitHubE2ETestCase(unittest.TestCase):
+    config_template: Path
+
     @classmethod
     def setUpClass(cls) -> None:
         github_auth = os.environ.get("WEBSUDO_E2E_GITHUB_AUTH")
@@ -64,7 +64,7 @@ class GitHubIssuesE2ETest(unittest.TestCase):
             build_cmd[2:2] = ["-cover", "-covermode=atomic", "-coverpkg=./..."]
         subprocess.run(build_cmd, cwd=cls.repo_root, check=True)
         cls.config_path.write_text(
-            CONFIG_TEMPLATE.read_text(encoding="utf-8").format(
+            cls.config_template.read_text(encoding="utf-8").format(
                 listen=cls.addr,
                 ca_cert_path=cls.ca_cert,
                 ca_key_path=cls.ca_key,
@@ -108,32 +108,15 @@ class GitHubIssuesE2ETest(unittest.TestCase):
         if tmp is not None:
             tmp.cleanup()
 
-    def test_placeholder_allow_all_injects_auth(self) -> None:
-        self.assert_proxy_injects_auth(PLACEHOLDER_ALLOW_ALL)
-
-    def test_placeholder_block_issue_2_injects_auth(self) -> None:
-        self.assert_proxy_injects_auth(PLACEHOLDER_BLOCK_ISSUE_2)
-
-    def test_placeholder_token_fails_without_proxy_auth_injection(self) -> None:
-        self.assert_direct_auth_check_status(PLACEHOLDER_ALLOW_ALL, 401)
-        self.assert_direct_auth_check_status(PLACEHOLDER_BLOCK_ISSUE_2, 401)
-
-    def test_placeholder_allow_all_can_access_both_issues(self) -> None:
-        self.assert_issue_status(PLACEHOLDER_ALLOW_ALL, 1, 200)
-        self.assert_issue_status(PLACEHOLDER_ALLOW_ALL, 2, 200)
-
-    def test_placeholder_block_issue_2_denies_issue_2(self) -> None:
-        self.assert_issue_status(PLACEHOLDER_BLOCK_ISSUE_2, 1, 200)
-        self.assert_issue_status(PLACEHOLDER_BLOCK_ISSUE_2, 2, 403)
-
-    def assert_proxy_injects_auth(self, placeholder: str) -> None:
+    def assert_auth_response(self, placeholder: str, url: str, response_name: str) -> None:
         auth_check = self.auth_check
-        url = auth_check["url"]
-        response_file = self.tmpdir / f"{auth_check['name']}-{safe_name(placeholder)}.json"
-        status = curl_status(self.addr, self.ca_cert, placeholder, url, response_file)
+        response_file = self.tmpdir / f"{response_name}-{auth_check['name']}-{safe_name(placeholder)}.json"
+        status = curl_status(None, None, placeholder, url, response_file)
 
         self.assertEqual(200, status, response_message(url, placeholder, 200, status, response_file))
+        self.assert_auth_response_body(response_file, auth_check)
 
+    def assert_auth_response_body(self, response_file: Path, auth_check: dict) -> None:
         body = json.loads(response_file.read_text(encoding="utf-8"))
         self.assertTrue(auth_check["validate"](body), f"{auth_check['failure']}:\n{json.dumps(body, indent=2)}")
 
@@ -145,12 +128,26 @@ class GitHubIssuesE2ETest(unittest.TestCase):
 
         self.assertEqual(expected, status, response_message(url, placeholder, expected, status, response_file))
 
-    def assert_issue_status(self, placeholder: str, issue: int, expected: int) -> None:
-        url = f"https://api.github.com/repos/fopina/websudo/issues/{issue}"
-        response_file = self.tmpdir / f"issue-{issue}-{expected}.json"
-        status = curl_status(self.addr, self.ca_cert, placeholder, url, response_file)
+    def assert_url_status(self, placeholder: str, url: str, expected: int, response_name: str) -> None:
+        response_file = self.tmpdir / f"{response_name}-{expected}.json"
+        status = curl_status(None, None, placeholder, url, response_file)
 
         self.assertEqual(expected, status, response_message(url, placeholder, expected, status, response_file))
+
+
+def forward_url(url: str) -> str:
+    return url
+
+
+def reverse_url(addr: str, upstream_url: str) -> str:
+    if not upstream_url.startswith(GITHUB_API):
+        raise ValueError(f"cannot build reverse proxy URL for {upstream_url}")
+    path = upstream_url.removeprefix(GITHUB_API)
+    return f"http://{addr}/github{path}"
+
+
+def issue_url(issue: int) -> str:
+    return f"{GITHUB_API}/repos/fopina/websudo/issues/{issue}"
 
 
 def curl_status(addr: str | None, ca_cert: Path | None, placeholder: str, url: str, response_file: Path) -> int:
@@ -245,7 +242,3 @@ def coverage_out_path(repo_root: Path) -> Path | None:
     if not path.is_absolute():
         path = repo_root / path
     return path
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
