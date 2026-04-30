@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -46,6 +47,7 @@ func NewWithLogger(cfg *config.Config, logger *slog.Logger) *Server {
 		cfg:    cfg,
 		logger: logger,
 	}
+	proxy.NonproxyHandler = http.HandlerFunc(s.handleNonProxyRequest)
 	proxy.OnRequest().DoFunc(s.handleRequest)
 	proxy.OnResponse().DoFunc(s.handleResponse)
 	s.httpServer = &http.Server{
@@ -69,6 +71,21 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *Server) handleNonProxyRequest(w http.ResponseWriter, req *http.Request) {
+	ctx := &goproxy.ProxyCtx{}
+	outReq, resp := s.handleRequest(req, ctx)
+	if resp == nil {
+		var err error
+		resp, err = http.DefaultTransport.RoundTrip(outReq)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+	}
+	resp = s.handleResponse(resp, ctx)
+	writeResponse(w, resp)
 }
 
 func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
@@ -113,6 +130,25 @@ func (s *Server) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *htt
 		s.logger.Info("response proxied", "route", ctx.UserData)
 	}
 	return resp
+}
+
+func writeResponse(w http.ResponseWriter, resp *http.Response) {
+	if resp == nil {
+		http.Error(w, "empty upstream response", http.StatusBadGateway)
+		return
+	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	if resp.Body != nil {
+		_, _ = io.Copy(w, resp.Body)
+	}
 }
 
 func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
