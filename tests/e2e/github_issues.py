@@ -15,15 +15,34 @@ from pathlib import Path
 PLACEHOLDER_ALLOW_ALL = "Bearer ph_allow_all"
 PLACEHOLDER_BLOCK_ISSUE_2 = "Bearer ph_block_issue_2"
 CONFIG_TEMPLATE = Path(__file__).with_name("github_issues.websudo.template.yaml")
+AUTH_CHECKS = [
+    {
+        "name": "installation-repositories",
+        "url": "https://api.github.com/installation/repositories",
+        "validate": lambda body: any(
+            repo.get("full_name") == "fopina/websudo"
+            for repo in body.get("repositories", [])
+        ),
+        "failure": "Expected response to include the fopina/websudo installation repository",
+    },
+    {
+        "name": "user",
+        "url": "https://api.github.com/user",
+        "validate": lambda body: bool(body.get("login")),
+        "failure": "Expected response to include an authenticated user login",
+    },
+]
 
 
 class GitHubIssuesE2ETest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        if not os.environ.get("WEBSUDO_E2E_GITHUB_AUTH"):
+        github_auth = os.environ.get("WEBSUDO_E2E_GITHUB_AUTH")
+        if not github_auth:
             raise unittest.SkipTest("WEBSUDO_E2E_GITHUB_AUTH is required for live GitHub e2e tests")
         if not shutil.which("curl"):
             raise unittest.SkipTest("curl is required for e2e tests")
+        cls.auth_check = discover_auth_check(github_auth)
 
         cls.repo_root = Path(__file__).resolve().parents[2]
         cls.tmp = tempfile.TemporaryDirectory()
@@ -90,14 +109,14 @@ class GitHubIssuesE2ETest(unittest.TestCase):
             tmp.cleanup()
 
     def test_placeholder_allow_all_injects_auth(self) -> None:
-        self.assert_authenticated_installation(PLACEHOLDER_ALLOW_ALL)
+        self.assert_proxy_injects_auth(PLACEHOLDER_ALLOW_ALL)
 
     def test_placeholder_block_issue_2_injects_auth(self) -> None:
-        self.assert_authenticated_installation(PLACEHOLDER_BLOCK_ISSUE_2)
+        self.assert_proxy_injects_auth(PLACEHOLDER_BLOCK_ISSUE_2)
 
     def test_placeholder_token_fails_without_proxy_auth_injection(self) -> None:
-        self.assert_direct_installation_status(PLACEHOLDER_ALLOW_ALL, 401)
-        self.assert_direct_installation_status(PLACEHOLDER_BLOCK_ISSUE_2, 401)
+        self.assert_direct_auth_check_status(PLACEHOLDER_ALLOW_ALL, 401)
+        self.assert_direct_auth_check_status(PLACEHOLDER_BLOCK_ISSUE_2, 401)
 
     def test_placeholder_allow_all_can_access_both_issues(self) -> None:
         self.assert_issue_status(PLACEHOLDER_ALLOW_ALL, 1, 200)
@@ -107,24 +126,21 @@ class GitHubIssuesE2ETest(unittest.TestCase):
         self.assert_issue_status(PLACEHOLDER_BLOCK_ISSUE_2, 1, 200)
         self.assert_issue_status(PLACEHOLDER_BLOCK_ISSUE_2, 2, 403)
 
-    def assert_authenticated_installation(self, placeholder: str) -> None:
-        url = "https://api.github.com/installation/repositories"
-        response_file = self.tmpdir / f"installation-repositories-{safe_name(placeholder)}.json"
+    def assert_proxy_injects_auth(self, placeholder: str) -> None:
+        auth_check = self.auth_check
+        url = auth_check["url"]
+        response_file = self.tmpdir / f"{auth_check['name']}-{safe_name(placeholder)}.json"
         status = curl_status(self.addr, self.ca_cert, placeholder, url, response_file)
 
         self.assertEqual(200, status, response_message(url, placeholder, 200, status, response_file))
 
-        installation = json.loads(response_file.read_text(encoding="utf-8"))
-        repositories = installation.get("repositories", [])
-        self.assertTrue(
-            any(repo.get("full_name") == "fopina/websudo" for repo in repositories),
-            f"Expected {url} to return the fopina/websudo installation repository:\n"
-            f"{json.dumps(installation, indent=2)}",
-        )
+        body = json.loads(response_file.read_text(encoding="utf-8"))
+        self.assertTrue(auth_check["validate"](body), f"{auth_check['failure']}:\n{json.dumps(body, indent=2)}")
 
-    def assert_direct_installation_status(self, placeholder: str, expected: int) -> None:
-        url = "https://api.github.com/installation/repositories"
-        response_file = self.tmpdir / f"direct-installation-repositories-{safe_name(placeholder)}.json"
+    def assert_direct_auth_check_status(self, placeholder: str, expected: int) -> None:
+        auth_check = self.auth_check
+        url = auth_check["url"]
+        response_file = self.tmpdir / f"direct-{auth_check['name']}-{safe_name(placeholder)}.json"
         status = curl_status(None, None, placeholder, url, response_file)
 
         self.assertEqual(expected, status, response_message(url, placeholder, expected, status, response_file))
@@ -169,6 +185,27 @@ def curl_status(addr: str | None, ca_cert: Path | None, placeholder: str, url: s
         capture_output=True,
     )
     return int(result.stdout)
+
+
+def discover_auth_check(github_auth: str) -> dict:
+    failures = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        for auth_check in AUTH_CHECKS:
+            url = auth_check["url"]
+            response_file = tmpdir / f"discover-{auth_check['name']}.json"
+            status = curl_status(None, None, github_auth, url, response_file)
+            if status != 200:
+                failures.append(response_message(url, github_auth, 200, status, response_file))
+                continue
+
+            body = json.loads(response_file.read_text(encoding="utf-8"))
+            if auth_check["validate"](body):
+                return auth_check
+
+            failures.append(f"{auth_check['failure']}:\n{json.dumps(body, indent=2)}")
+
+    raise unittest.SkipTest("WEBSUDO_E2E_GITHUB_AUTH cannot call supported auth-check endpoints\n" + "\n".join(failures))
 
 
 def response_message(url: str, placeholder: str, expected: int, status: int, response_file: Path) -> str:
