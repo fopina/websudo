@@ -1,0 +1,21 @@
+listen: {listen}
+
+tls:
+  generate_on_boot: true
+  ca_cert_path: {ca_cert_path}
+  ca_key_path: {ca_key_path}
+
+services:
+  github-reverse:
+    route_prefix: /github
+    base_url: https://api.github.com
+    placeholder_auth: Authorization
+    require_placeholder_prefix: "Bearer ph_"
+    inject_auth: env:WEBSUDO_E2E_GITHUB_AUTH
+    allowed_methods:
+      - GET
+    variants:
+      - name: block-issue-2
+        placeholder_contains: block_issue_2
+        denied_paths:
+          - /repos/fopina/websudo/issues/2
