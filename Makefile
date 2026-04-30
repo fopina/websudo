@@ -27,6 +27,10 @@ test: clean ## display test coverage
 	go test --cover -parallel=1 -v -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | sort -rnk3
 
+.PHONY: e2e
+e2e: ## run end-to-end tests
+	./tests/e2e/test_forward_proxy.py
+
 .PHONY: clean
 clean: ## clean up environment
 	@rm -rf coverage.out dist/ $(projectname)

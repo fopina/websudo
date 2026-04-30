@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -24,7 +27,12 @@ func newRootCmd(version string) *cobra.Command {
 
 // Execute invokes the command.
 func Execute(version string) error {
-	if err := newRootCmd(version).Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	cmd := newRootCmd(version)
+	cmd.SetContext(ctx)
+	if err := cmd.Execute(); err != nil {
 		return fmt.Errorf("error executing root command: %w", err)
 	}
 
