@@ -33,6 +33,7 @@ func TestLoad(t *testing.T) {
 	cfg, err := Load(path)
 	require.NoError(t, err)
 	require.Equal(t, "127.0.0.1:8080", cfg.Listen)
+	require.True(t, cfg.AllowUnconfiguredDestinations)
 	require.Contains(t, cfg.Services, "github")
 	require.Equal(t, "Bearer ph_", cfg.Services["github"].RequirePlaceholderPrefix)
 	require.Equal(t, "/github", cfg.Services["github"].RoutePrefix)
