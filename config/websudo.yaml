@@ -58,6 +58,21 @@ services:
     require_placeholder_prefix: "ph_"
     inject_auth: env:GITHUB_SESSION
     inject_auth_target: cookie:user_session
+    cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
     allowed_methods: [GET]
     allowed_paths:
       - /settings/profile
+
+  app-browser:
+    route_prefix: /app
+    base_url: https://internal.example.com
+    cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
+    allowed_methods: [GET, POST]
+    allowed_paths:
+      - /dashboard
+    login:
+      path: /session
+      username_field: username
+      password_field: password
+      username: env:APP_LOGIN_USER
+      password: env:APP_LOGIN_PASS

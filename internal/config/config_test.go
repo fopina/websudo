@@ -96,3 +96,20 @@ func TestEffectiveServiceVariantCanOverrideInjectAuthTarget(t *testing.T) {
 	require.Equal(t, "browser", variantName)
 	require.Equal(t, "cookie:_session", effective.InjectAuthTarget)
 }
+
+func TestLoginCredentialsResolveEnvSources(t *testing.T) {
+	t.Setenv("UPSTREAM_USER", "boss")
+	t.Setenv("UPSTREAM_PASS", "swordfish")
+
+	username, password, err := (LoginConfig{Username: "env:UPSTREAM_USER", Password: "env:UPSTREAM_PASS"}).LoginCredentials()
+	require.NoError(t, err)
+	require.Equal(t, "boss", username)
+	require.Equal(t, "swordfish", password)
+}
+
+func TestCookieCipherKeyUsesResolvedSecret(t *testing.T) {
+	t.Setenv("COOKIE_SECRET", "secret-key")
+	key, err := (Service{CookieEncryptionKey: "env:COOKIE_SECRET"}).CookieCipherKey()
+	require.NoError(t, err)
+	require.Len(t, key, 32)
+}

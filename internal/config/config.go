@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,20 +26,31 @@ type TLSConfig struct {
 	GenerateOnBootSet bool   `yaml:"-"`
 }
 
+// LoginConfig defines a special upstream login request that should receive configured credentials.
+type LoginConfig struct {
+	Path          string `yaml:"path"`
+	UsernameField string `yaml:"username_field"`
+	PasswordField string `yaml:"password_field"`
+	Username      string `yaml:"username"`
+	Password      string `yaml:"password"`
+}
+
 // Service describes one upstream service and its policy.
 type Service struct {
-	BaseURL                  string    `yaml:"base_url"`
-	MatchHost                string    `yaml:"match_host"`
-	RoutePrefix              string    `yaml:"route_prefix"`
-	AllowedMethods           []string  `yaml:"allowed_methods"`
-	AllowedPaths             []string  `yaml:"allowed_paths"`
-	DeniedPaths              []string  `yaml:"denied_paths"`
-	HeadersAllow             []string  `yaml:"headers_allow"`
-	PlaceholderAuth          string    `yaml:"placeholder_auth"`
-	InjectAuth               string    `yaml:"inject_auth"`
-	InjectAuthTarget         string    `yaml:"inject_auth_target"`
-	RequirePlaceholderPrefix string    `yaml:"require_placeholder_prefix"`
-	Variants                 []Variant `yaml:"variants"`
+	BaseURL                  string      `yaml:"base_url"`
+	MatchHost                string      `yaml:"match_host"`
+	RoutePrefix              string      `yaml:"route_prefix"`
+	AllowedMethods           []string    `yaml:"allowed_methods"`
+	AllowedPaths             []string    `yaml:"allowed_paths"`
+	DeniedPaths              []string    `yaml:"denied_paths"`
+	HeadersAllow             []string    `yaml:"headers_allow"`
+	PlaceholderAuth          string      `yaml:"placeholder_auth"`
+	InjectAuth               string      `yaml:"inject_auth"`
+	InjectAuthTarget         string      `yaml:"inject_auth_target"`
+	RequirePlaceholderPrefix string      `yaml:"require_placeholder_prefix"`
+	CookieEncryptionKey      string      `yaml:"cookie_encryption_key"`
+	Login                    LoginConfig `yaml:"login"`
+	Variants                 []Variant   `yaml:"variants"`
 }
 
 // Variant is a placeholder-token-specific override for a service.
@@ -106,13 +118,13 @@ func normalizeService(name string, svc Service) (Service, error) {
 	if svc.MatchHost == "" && svc.RoutePrefix == "" {
 		return Service{}, fmt.Errorf("service %q must define either match_host or route_prefix", name)
 	}
-	if svc.PlaceholderAuth == "" {
+	if svc.PlaceholderAuth == "" && svc.Login.Path == "" {
 		return Service{}, fmt.Errorf("service %q is missing placeholder_auth", name)
 	}
-	if svc.InjectAuth == "" {
+	if svc.InjectAuth == "" && svc.Login.Path == "" {
 		return Service{}, fmt.Errorf("service %q is missing inject_auth", name)
 	}
-	if svc.InjectAuthTarget == "" {
+	if svc.InjectAuthTarget == "" && svc.PlaceholderAuth != "" {
 		svc.InjectAuthTarget = svc.PlaceholderAuth
 	}
 	if svc.RequirePlaceholderPrefix == "" {
@@ -120,6 +132,28 @@ func normalizeService(name string, svc Service) (Service, error) {
 	}
 	if svc.RoutePrefix != "" && !strings.HasPrefix(svc.RoutePrefix, "/") {
 		svc.RoutePrefix = "/" + svc.RoutePrefix
+	}
+	if svc.Login.Path != "" {
+		if !strings.HasPrefix(svc.Login.Path, "/") {
+			svc.Login.Path = "/" + svc.Login.Path
+		}
+		if svc.Login.UsernameField == "" {
+			return Service{}, fmt.Errorf("service %q login is missing username_field", name)
+		}
+		if svc.Login.PasswordField == "" {
+			return Service{}, fmt.Errorf("service %q login is missing password_field", name)
+		}
+		if svc.Login.Username == "" {
+			return Service{}, fmt.Errorf("service %q login is missing username", name)
+		}
+		if svc.Login.Password == "" {
+			return Service{}, fmt.Errorf("service %q login is missing password", name)
+		}
+		if svc.CookieEncryptionKey == "" {
+			return Service{}, fmt.Errorf("service %q login requires cookie_encryption_key", name)
+		}
+	} else if svc.Login.UsernameField != "" || svc.Login.PasswordField != "" || svc.Login.Username != "" || svc.Login.Password != "" {
+		return Service{}, fmt.Errorf("service %q login fields require login.path", name)
 	}
 
 	for i, variant := range svc.Variants {
@@ -175,6 +209,47 @@ func (s Service) InjectedAuthValue() (string, error) {
 	}
 
 	return value, nil
+}
+
+// LoginCredentials resolves the configured upstream login credentials.
+func (l LoginConfig) LoginCredentials() (string, string, error) {
+	username, err := resolveValue(l.Username)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve login username: %w", err)
+	}
+	password, err := resolveValue(l.Password)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve login password: %w", err)
+	}
+	return username, password, nil
+}
+
+// CookieCipherKey resolves the cookie encryption secret into a stable AES-256 key.
+func (s Service) CookieCipherKey() ([]byte, error) {
+	if s.CookieEncryptionKey == "" {
+		return nil, nil
+	}
+	value, err := resolveValue(s.CookieEncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolve cookie_encryption_key: %w", err)
+	}
+	sum := sha256.Sum256([]byte(value))
+	return sum[:], nil
+}
+
+func resolveValue(raw string) (string, error) {
+	const envPrefix = "env:"
+	if strings.HasPrefix(raw, envPrefix) {
+		value := os.Getenv(strings.TrimPrefix(raw, envPrefix))
+		if value == "" {
+			return "", fmt.Errorf("source %q resolved empty value", raw)
+		}
+		return value, nil
+	}
+	if raw == "" {
+		return "", fmt.Errorf("source resolved empty value")
+	}
+	return raw, nil
 }
 
 func chooseString(primary string, fallback string) string {

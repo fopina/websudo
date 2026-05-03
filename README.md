@@ -20,6 +20,7 @@ Current v1 scaffold includes:
 - method/path policy checks
 - placeholder credential validation
 - upstream credential injection from environment variables into headers or cookies
+- encrypted upstream session-cookie round-tripping for browser-style logins
 - per-placeholder-token variants for the same host or route
 - unit and e2e tests for credential validation, proxy routing, passthrough, and credential replacement
 
@@ -47,6 +48,8 @@ Both modes use the same per-service fields:
 - `allowed_methods`
 - `allowed_paths`
 - `denied_paths`
+- `cookie_encryption_key` (required when using encrypted upstream cookies or login capture)
+- `login.path`, `login.username_field`, `login.password_field`, `login.username`, `login.password`
 - `variants`
 
 ## Example: forward proxy by hostname
@@ -112,6 +115,7 @@ services:
     require_placeholder_prefix: "ph_"
     inject_auth: env:GITHUB_SESSION
     inject_auth_target: cookie:user_session
+    cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
     allowed_methods: [GET]
     allowed_paths:
       - /settings/profile
@@ -121,6 +125,34 @@ Behavior:
 - request with cookie `websudo_ph=ph_browser_demo` is accepted
 - upstream receives `user_session=<real value from env:GITHUB_SESSION>`
 - the placeholder cookie is removed before the request is forwarded
+- upstream `Set-Cookie` values are encrypted before they are returned to the client
+- encrypted client cookies are decrypted before upstream requests; invalid ciphertext is passed through unchanged
+
+## Example: upstream login capture for browser sessions
+
+```yaml
+services:
+  app-browser:
+    route_prefix: /app
+    base_url: https://internal.example.com
+    cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
+    allowed_methods: [GET, POST]
+    allowed_paths:
+      - /dashboard
+    login:
+      path: /session
+      username_field: username
+      password_field: password
+      username: env:APP_LOGIN_USER
+      password: env:APP_LOGIN_PASS
+```
+
+Behavior:
+- POST `/app/session` does not require placeholder auth, and the rest of the service can rely on the encrypted session cookies instead
+- `username` and `password` form fields are replaced with the configured upstream credentials
+- upstream `Set-Cookie` headers are encrypted before they reach the client
+- later client `Cookie` headers are decrypted before forwarding upstream
+- if a client cookie cannot be decrypted, it is forwarded as-is
 
 ## Validation covered by tests
 
@@ -134,6 +166,8 @@ Behavior:
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
 - placeholder cookies can be validated and swapped for upstream session cookies
+- upstream login form fields can be replaced with configured credentials on a specific login endpoint
+- upstream Set-Cookie headers can be encrypted and client cookies decrypted on the way back in
 
 ## Next steps
 
