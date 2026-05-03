@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Optional
 
 
 PLACEHOLDER_ALLOW_ALL = "Bearer ph_allow_all"
@@ -150,7 +151,7 @@ def issue_url(issue: int) -> str:
     return f"{GITHUB_API}/repos/fopina/websudo/issues/{issue}"
 
 
-def curl_status(addr: str | None, ca_cert: Path | None, placeholder: str, url: str, response_file: Path) -> int:
+def curl_status(addr: Optional[str], ca_cert: Optional[Path], placeholder: str, url: str, response_file: Path) -> int:
     args = [
         "curl",
         "--silent",
@@ -234,7 +235,7 @@ def safe_name(value: str) -> str:
     return "".join(char if char.isalnum() else "-" for char in value)
 
 
-def coverage_out_path(repo_root: Path) -> Path | None:
+def coverage_out_path(repo_root: Path) -> Optional[Path]:
     configured = os.environ.get("WEBSUDO_E2E_COVERAGE_OUT")
     if not configured:
         return None

@@ -179,3 +179,15 @@ Behavior:
 ## Build
 
 Check out [CONTRIBUTING.md](CONTRIBUTING.md)
+
+
+## Live e2e test credentials
+
+GitHub-backed e2e tests use `WEBSUDO_E2E_GITHUB_AUTH`.
+
+DefectDojo-backed e2e tests use:
+- `WEBSUDO_E2E_DEFECTDOJO_USERNAME`
+- `WEBSUDO_E2E_DEFECTDOJO_PASSWORD`
+- `WEBSUDO_E2E_COOKIE_SECRET` (optional; defaults to a test secret)
+
+When the DefectDojo credentials are not set, those live tests are skipped.

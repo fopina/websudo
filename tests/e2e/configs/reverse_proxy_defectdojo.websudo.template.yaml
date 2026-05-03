@@ -1,0 +1,24 @@
+listen: {listen}
+
+tls:
+  generate_on_boot: true
+  ca_cert_path: {ca_cert_path}
+  ca_key_path: {ca_key_path}
+
+services:
+  defectdojo:
+    route_prefix: /dojo
+    base_url: https://demo.defectdojo.org
+    cookie_encryption_key: env:WEBSUDO_E2E_COOKIE_SECRET
+    allowed_methods:
+      - GET
+      - POST
+    allowed_paths:
+      - /login
+      - /api/v2/user_profile/
+    login:
+      path: /login
+      username_field: username
+      password_field: password
+      username: env:WEBSUDO_E2E_DEFECTDOJO_USERNAME
+      password: env:WEBSUDO_E2E_DEFECTDOJO_PASSWORD
