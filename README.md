@@ -48,7 +48,8 @@ Both modes use the same per-service fields:
 - `allowed_methods`
 - `allowed_paths`
 - `denied_paths`
-- `cookie_encryption_key` (required when using encrypted upstream cookies or login capture)
+- `cookie_encryption_key` (optional explicit secret or `env:...` override)
+- `cookie_encryption_key_path` (optional override for the persisted secret file; defaults to a generated file next to the config)
 - `login.path`, `login.username_field`, `login.password_field`, `login.username`, `login.password`
 - `variants`
 
@@ -115,7 +116,7 @@ services:
     require_placeholder_prefix: "ph_"
     inject_auth: env:GITHUB_SESSION
     inject_auth_target: cookie:user_session
-    cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
+    cookie_encryption_key_path: ./app-browser.cookie-key
     allowed_methods: [GET]
     allowed_paths:
       - /settings/profile
@@ -126,6 +127,7 @@ Behavior:
 - upstream receives `user_session=<real value from env:GITHUB_SESSION>`
 - the placeholder cookie is removed before the request is forwarded
 - upstream `Set-Cookie` values are encrypted before they are returned to the client
+- if no explicit `cookie_encryption_key` is configured, websudo generates and persists a secret file next to the config by default
 - encrypted client cookies are decrypted before upstream requests
 - client cookies that do not decrypt are forwarded upstream unchanged (intentional passthrough, not a validation failure)
 
@@ -136,7 +138,7 @@ services:
   app-browser:
     route_prefix: /app
     base_url: https://internal.example.com
-    cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
+    cookie_encryption_key_path: ./app-browser.cookie-key
     allowed_methods: [GET, POST]
     allowed_paths:
       - /dashboard
@@ -152,6 +154,7 @@ Behavior:
 - POST `/app/session` is intentionally exempt from placeholder-auth gating so the login flow can establish the upstream session, and the rest of the service can rely on the encrypted session cookies instead
 - `username` and `password` form fields are replaced with the configured upstream credentials
 - upstream `Set-Cookie` headers are encrypted before they reach the client
+- if `cookie_encryption_key` is omitted, websudo generates and persists a default key file next to the config (or at `cookie_encryption_key_path` if set)
 - later client `Cookie` headers are decrypted before forwarding upstream
 - if a client cookie cannot be decrypted, it is forwarded as-is
 

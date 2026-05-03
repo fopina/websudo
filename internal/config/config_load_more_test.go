@@ -31,7 +31,7 @@ func TestNormalizeServiceRejectsMissingBaseURL(t *testing.T) {
 		MatchHost:       "api.github.com",
 		PlaceholderAuth: "Authorization",
 		InjectAuth:      "env:GITHUB_TOKEN",
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing base_url")
 }
@@ -41,7 +41,7 @@ func TestNormalizeServiceRejectsMissingPlaceholderAuth(t *testing.T) {
 		MatchHost:  "api.github.com",
 		BaseURL:    "https://api.github.com",
 		InjectAuth: "env:GITHUB_TOKEN",
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing placeholder_auth")
 }
@@ -51,7 +51,7 @@ func TestNormalizeServiceRejectsMissingInjectAuth(t *testing.T) {
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "Authorization",
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing inject_auth")
 }
@@ -65,7 +65,7 @@ func TestNormalizeServiceRejectsVariantWithoutName(t *testing.T) {
 		Variants: []Variant{{
 			PlaceholderContains: "repo",
 		}},
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing name")
 }
@@ -79,7 +79,7 @@ func TestNormalizeServiceRejectsVariantWithoutPlaceholderMatch(t *testing.T) {
 		Variants: []Variant{{
 			Name: "repo-write",
 		}},
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing placeholder_contains")
 }
