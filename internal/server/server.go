@@ -109,14 +109,7 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 	if matched.path != req.URL.Path {
 		req.URL.Path = matched.path
 	}
-
-	if err := validateRequest(req, matched.service); err != nil {
-		s.logger.Warn("request denied", "service", matched.serviceName, "variant", matched.variantName, "host", req.URL.Host, "path", req.URL.Path, "error", err)
-		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
-	}
-
-	upstreamAuth, err := matched.service.InjectedAuthValue()
-	if err != nil {
+	if err := decryptRequestCookies(req, matched.service); err != nil {
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
 	}
 
@@ -125,17 +118,53 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, fmt.Sprintf("invalid base_url for %s", matched.serviceName))
 	}
 
-	placeholderTarget, err := parseAuthTarget(matched.service.PlaceholderAuth)
-	if err != nil {
-		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+	var placeholderTarget *authTarget
+	if matched.service.PlaceholderAuth != "" {
+		parsedPlaceholderTarget, err := parseAuthTarget(matched.service.PlaceholderAuth)
+		if err != nil {
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+		}
+		placeholderTarget = &parsedPlaceholderTarget
 	}
-	injectTargetRaw := matched.service.InjectAuthTarget
-	if injectTargetRaw == "" {
-		injectTargetRaw = matched.service.PlaceholderAuth
+	var injectTarget *authTarget
+	if matched.service.InjectAuth != "" {
+		injectTargetRaw := matched.service.InjectAuthTarget
+		if injectTargetRaw == "" {
+			injectTargetRaw = matched.service.PlaceholderAuth
+		}
+		parsedInjectTarget, err := parseAuthTarget(injectTargetRaw)
+		if err != nil {
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+		}
+		injectTarget = &parsedInjectTarget
 	}
-	injectTarget, err := parseAuthTarget(injectTargetRaw)
-	if err != nil {
-		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+
+	isLogin := isLoginRequest(req, matched.service)
+	if isLogin {
+		if err := rewriteLoginRequest(req, matched.service); err != nil {
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusBadRequest, err.Error())
+		}
+		if placeholderTarget != nil {
+			clearAuthValue(req, *placeholderTarget)
+		}
+	} else {
+		if err := validateRequest(req, matched.service); err != nil {
+			s.logger.Warn("request denied", "service", matched.serviceName, "variant", matched.variantName, "host", req.URL.Host, "path", req.URL.Path, "error", err)
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
+		}
+
+		if matched.service.InjectAuth != "" {
+			upstreamAuth, err := matched.service.InjectedAuthValue()
+			if err != nil {
+				return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+			}
+			if placeholderTarget != nil {
+				clearAuthValue(req, *placeholderTarget)
+			}
+			if injectTarget != nil {
+				setAuthValue(req, *injectTarget, upstreamAuth)
+			}
+		}
 	}
 
 	req.URL.Scheme = targetURL.Scheme
@@ -143,17 +172,24 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 	req.Host = targetURL.Host
 	req.URL.Path = joinURLPath(targetURL.Path, req.URL.Path)
 	req.RequestURI = ""
-	clearAuthValue(req, placeholderTarget)
-	setAuthValue(req, injectTarget, upstreamAuth)
 
-	ctx.UserData = map[string]string{"service": matched.serviceName, "variant": matched.variantName}
-	s.logger.Info("request allowed", "service", matched.serviceName, "variant", matched.variantName, "method", req.Method, "path", req.URL.Path)
+	ctx.UserData = routeContext{serviceName: matched.serviceName, variantName: matched.variantName, service: matched.service}
+	s.logger.Info("request allowed", "service", matched.serviceName, "variant", matched.variantName, "method", req.Method, "path", req.URL.Path, "login", isLogin)
 	return req, nil
 }
 
 func (s *Server) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-	if resp != nil && ctx != nil && ctx.UserData != nil {
-		s.logger.Info("response proxied", "route", ctx.UserData)
+	if resp == nil {
+		return nil
+	}
+	if ctx != nil {
+		if route, ok := ctx.UserData.(routeContext); ok {
+			if err := encryptResponseCookies(resp, route.service); err != nil {
+				s.logger.Warn("response cookie encryption failed", "service", route.serviceName, "variant", route.variantName, "error", err)
+				return responseError(resp, resp.Request, http.StatusInternalServerError, err.Error())
+			}
+			s.logger.Info("response proxied", "service", route.serviceName, "variant", route.variantName)
+		}
 	}
 	return resp
 }
@@ -232,6 +268,10 @@ func validateRequest(req *http.Request, svc config.Service) error {
 		}
 	}
 
+	if svc.Login.Path != "" || svc.PlaceholderAuth == "" {
+		return nil
+	}
+
 	placeholder, err := getAuthValue(req, svc.PlaceholderAuth)
 	if err != nil {
 		return err
@@ -247,6 +287,9 @@ func validateRequest(req *http.Request, svc config.Service) error {
 }
 
 func getAuthValue(req *http.Request, rawTarget string) (string, error) {
+	if rawTarget == "" {
+		return "", nil
+	}
 	target, err := parseAuthTarget(rawTarget)
 	if err != nil {
 		return "", err
