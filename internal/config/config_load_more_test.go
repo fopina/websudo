@@ -83,3 +83,34 @@ func TestNormalizeServiceRejectsVariantWithoutPlaceholderMatch(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing placeholder_contains")
 }
+
+func TestLoadDefaultsBlockUnconfiguredDestinationsToFalse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "default-allow.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`services:
+  github:
+    match_host: api.github.com
+    base_url: https://api.github.com
+    placeholder_auth: Authorization
+    inject_auth: env:GITHUB_TOKEN
+`), 0o600))
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.False(t, cfg.BlockUnconfiguredDestinations)
+}
+
+func TestLoadAllowsEnablingBlockUnconfiguredDestinations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deny-unknown.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`block_unconfigured_destinations: true
+services:
+  github:
+    match_host: api.github.com
+    base_url: https://api.github.com
+    placeholder_auth: Authorization
+    inject_auth: env:GITHUB_TOKEN
+`), 0o600))
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.True(t, cfg.BlockUnconfiguredDestinations)
+}

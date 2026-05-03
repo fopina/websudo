@@ -11,9 +11,10 @@ import (
 
 // Config is the top-level websudo configuration.
 type Config struct {
-	Listen   string             `yaml:"listen"`
-	TLS      TLSConfig          `yaml:"tls"`
-	Services map[string]Service `yaml:"services"`
+	Listen                        string             `yaml:"listen"`
+	TLS                           TLSConfig          `yaml:"tls"`
+	BlockUnconfiguredDestinations bool               `yaml:"block_unconfigured_destinations"`
+	Services                      map[string]Service `yaml:"services"`
 }
 
 // TLSConfig controls CA storage and TLS handling.

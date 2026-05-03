@@ -60,7 +60,7 @@ func TestHandleRequestForwardProxyReplacesPlaceholderCredentials(t *testing.T) {
 	require.Equal(t, "Bearer live_token", outReq.Header.Get("Authorization"))
 }
 
-func TestHandleRequestRejectsUnknownRoute(t *testing.T) {
+func TestHandleRequestPassesThroughUnknownHostByDefault(t *testing.T) {
 	srv := New(&config.Config{Services: map[string]config.Service{
 		"github": {
 			MatchHost:                "api.github.com",
@@ -70,6 +70,27 @@ func TestHandleRequestRejectsUnknownRoute(t *testing.T) {
 			RequirePlaceholderPrefix: "Bearer ph_",
 		},
 	}})
+
+	req := httptest.NewRequest(http.MethodGet, "http://gitlab.com/user", nil)
+	outReq, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.Nil(t, resp)
+	require.Same(t, req, outReq)
+	require.Equal(t, "gitlab.com", outReq.URL.Host)
+}
+
+func TestHandleRequestRejectsUnknownHostWhenUnconfiguredDestinationsDisabled(t *testing.T) {
+	srv := New(&config.Config{
+		BlockUnconfiguredDestinations: true,
+		Services: map[string]config.Service{
+			"github": {
+				MatchHost:                "api.github.com",
+				BaseURL:                  "https://upstream.internal",
+				PlaceholderAuth:          "Authorization",
+				InjectAuth:               "env:GITHUB_TOKEN",
+				RequirePlaceholderPrefix: "Bearer ph_",
+			},
+		},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "http://gitlab.com/user", nil)
 	_, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})

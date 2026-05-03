@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -27,6 +28,8 @@ type matchedRoute struct {
 	service     config.Service
 	path        string
 }
+
+var errNoConfiguredService = errors.New("no configured service matches request")
 
 // New creates a server from config.
 func New(cfg *config.Config) *Server {
@@ -91,6 +94,10 @@ func (s *Server) handleNonProxyRequest(w http.ResponseWriter, req *http.Request)
 func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	matched, err := s.matchRoute(req)
 	if err != nil {
+		if errors.Is(err, errNoConfiguredService) && !s.cfg.BlockUnconfiguredDestinations && req.URL.Hostname() != "" {
+			s.logger.Info("request passed through", "method", req.Method, "host", req.URL.Host, "path", req.URL.Path)
+			return req, nil
+		}
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
 	}
 
@@ -175,7 +182,7 @@ func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
 		return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: req.URL.Path}, nil
 	}
 
-	return matchedRoute{}, fmt.Errorf("no configured service matches request host %q or path %q", host, req.URL.Path)
+	return matchedRoute{}, fmt.Errorf("%w host %q or path %q", errNoConfiguredService, host, req.URL.Path)
 }
 
 func validateRequest(req *http.Request, svc config.Service) error {

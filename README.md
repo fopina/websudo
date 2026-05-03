@@ -15,11 +15,13 @@ Current v1 scaffold includes:
 - proxy runtime built on `goproxy`
 - forward proxy mode using hostname matching
 - reverse proxy mode using explicit local route prefixes
+- default passthrough for destinations that are not explicitly configured
+- optional blocking of unconfigured destinations across both HTTP and HTTPS CONNECT with a default-off flag
 - method/path policy checks
 - placeholder credential validation
 - upstream credential injection from environment variables
 - per-placeholder-token variants for the same host or route
-- unit tests for credential validation, forward mode, reverse mode, and credential replacement
+- unit and e2e tests for credential validation, proxy routing, passthrough, and credential replacement
 
 ## Usage
 
@@ -34,7 +36,10 @@ Each service can define one or both of:
 - `match_host`: for forward proxy requests, matched by requested hostname
 - `route_prefix`: for reverse proxy requests, matched by local path prefix such as `/github`
 
-Both modes use the same:
+Top-level options:
+- `block_unconfigured_destinations`: defaults to `false`; when `true`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
+
+Both modes use the same per-service fields:
 - `placeholder_auth`
 - `require_placeholder_prefix`
 - `inject_auth`
@@ -102,7 +107,8 @@ Behavior:
 - forward proxy requests are matched by hostname and rewritten to the configured upstream
 - reverse proxy requests are matched by route prefix and rewritten to the configured upstream
 - valid placeholder credentials are replaced with the configured upstream credentials
-- unknown hosts and unknown routes are rejected
+- unconfigured HTTP and HTTPS destinations pass through by default
+- unconfigured HTTP and HTTPS destinations are blocked when `block_unconfigured_destinations: true`
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
 
@@ -110,7 +116,7 @@ Behavior:
 
 - tighten request header forwarding rules
 - add structured audit records for allow/deny decisions
-- add integration tests against a live upstream test server
+- refine passthrough controls for direct reverse-proxy-only deployments
 - refine config for multiple credential strategies
 
 ## Build

@@ -26,6 +26,9 @@ func applyTLSConfig(proxy *goproxy.ProxyHttpServer, cfg *config.Config) error {
 		if shouldInterceptTLS(cfg, host) {
 			return mitmAction, host
 		}
+		if cfg.BlockUnconfiguredDestinations {
+			return goproxy.RejectConnect, host
+		}
 		return goproxy.OkConnect, host
 	})
 
