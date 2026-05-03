@@ -19,7 +19,7 @@ Current v1 scaffold includes:
 - optional blocking of unconfigured destinations across both HTTP and HTTPS CONNECT with a default-off flag
 - method/path policy checks
 - placeholder credential validation
-- upstream credential injection from environment variables
+- upstream credential injection from environment variables into headers or cookies
 - per-placeholder-token variants for the same host or route
 - unit and e2e tests for credential validation, proxy routing, passthrough, and credential replacement
 
@@ -40,9 +40,10 @@ Top-level options:
 - `block_unconfigured_destinations`: defaults to `false`; when `true`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
 
 Both modes use the same per-service fields:
-- `placeholder_auth`
+- `placeholder_auth` (`Authorization` is shorthand for `header:Authorization`; `cookie:name` is also supported)
 - `require_placeholder_prefix`
 - `inject_auth`
+- `inject_auth_target` (defaults to the same target as `placeholder_auth`)
 - `allowed_methods`
 - `allowed_paths`
 - `denied_paths`
@@ -100,17 +101,39 @@ Behavior:
 - request to `/github/user` maps to upstream `/user`
 - request to `/github/repos/fopina/websudo` only works when the placeholder token selects a variant that allows that path
 
+## Example: browser session cookie injection
+
+```yaml
+services:
+  github-browser:
+    match_host: github.com
+    base_url: https://github.com
+    placeholder_auth: cookie:websudo_ph
+    require_placeholder_prefix: "ph_"
+    inject_auth: env:GITHUB_SESSION
+    inject_auth_target: cookie:user_session
+    allowed_methods: [GET]
+    allowed_paths:
+      - /settings/profile
+```
+
+Behavior:
+- request with cookie `websudo_ph=ph_browser_demo` is accepted
+- upstream receives `user_session=<real value from env:GITHUB_SESSION>`
+- the placeholder cookie is removed before the request is forwarded
+
 ## Validation covered by tests
 
 - requests without placeholder credentials are rejected
 - requests with non-placeholder credentials are rejected
 - forward proxy requests are matched by hostname and rewritten to the configured upstream
 - reverse proxy requests are matched by route prefix and rewritten to the configured upstream
-- valid placeholder credentials are replaced with the configured upstream credentials
+- valid placeholder credentials are replaced with the configured upstream credentials in the configured header or cookie target
 - unconfigured HTTP and HTTPS destinations pass through by default
 - unconfigured HTTP and HTTPS destinations are blocked when `block_unconfigured_destinations: true`
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
+- placeholder cookies can be validated and swapped for upstream session cookies
 
 ## Next steps
 

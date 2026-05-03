@@ -19,6 +19,7 @@ func TestLoad(t *testing.T) {
     base_url: https://api.github.com
     placeholder_auth: Authorization
     inject_auth: env:GITHUB_TOKEN
+    inject_auth_target: cookie:_session
     allowed_methods: [GET]
     allowed_paths:
       - /user
@@ -37,6 +38,7 @@ func TestLoad(t *testing.T) {
 	require.Contains(t, cfg.Services, "github")
 	require.Equal(t, "Bearer ph_", cfg.Services["github"].RequirePlaceholderPrefix)
 	require.Equal(t, "/github", cfg.Services["github"].RoutePrefix)
+	require.Equal(t, "cookie:_session", cfg.Services["github"].InjectAuthTarget)
 	require.Len(t, cfg.Services["github"].Variants, 1)
 }
 
@@ -65,4 +67,32 @@ func TestEffectiveServiceVariantOverride(t *testing.T) {
 	require.Equal(t, "repo-write", variantName)
 	require.Equal(t, []string{"/repos/*/*"}, effective.AllowedPaths)
 	require.Equal(t, "env:REPO_TOKEN", effective.InjectAuth)
+}
+
+func TestNormalizeServiceDefaultsInjectAuthTargetToPlaceholderAuth(t *testing.T) {
+	svc, err := normalizeService("github", Service{
+		MatchHost:       "api.github.com",
+		BaseURL:         "https://api.github.com",
+		PlaceholderAuth: "cookie:websudo_ph",
+		InjectAuth:      "env:GITHUB_SESSION",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "cookie:websudo_ph", svc.InjectAuthTarget)
+}
+
+func TestEffectiveServiceVariantCanOverrideInjectAuthTarget(t *testing.T) {
+	service := Service{
+		PlaceholderAuth:  "Authorization",
+		InjectAuth:       "env:BASE_TOKEN",
+		InjectAuthTarget: "Authorization",
+		Variants: []Variant{{
+			Name:                "browser",
+			PlaceholderContains: "browser",
+			InjectAuthTarget:    "cookie:_session",
+		}},
+	}
+
+	effective, variantName := service.EffectiveService("Bearer ph_browser_123")
+	require.Equal(t, "browser", variantName)
+	require.Equal(t, "cookie:_session", effective.InjectAuthTarget)
 }
