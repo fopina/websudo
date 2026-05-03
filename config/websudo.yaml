@@ -66,11 +66,15 @@ services:
   app-browser:
     route_prefix: /app
     base_url: https://internal.example.com
+    # cookies issued by upstream are encrypted before they reach the client;
+    # cookies that do not decrypt later are passed through unchanged.
     cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
     allowed_methods: [GET, POST]
     allowed_paths:
       - /dashboard
     login:
+      # login.path is intentionally allowed without placeholder-auth gating so
+      # the upstream session can be established first.
       path: /session
       username_field: username
       password_field: password
