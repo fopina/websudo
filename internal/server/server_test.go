@@ -61,7 +61,7 @@ func TestHandleRequestForwardProxyReplacesPlaceholderCredentials(t *testing.T) {
 }
 
 func TestHandleRequestPassesThroughUnknownHostByDefault(t *testing.T) {
-	srv := New(&config.Config{AllowUnconfiguredDestinations: true, Services: map[string]config.Service{
+	srv := New(&config.Config{Services: map[string]config.Service{
 		"github": {
 			MatchHost:                "api.github.com",
 			BaseURL:                  "https://upstream.internal",
@@ -80,7 +80,7 @@ func TestHandleRequestPassesThroughUnknownHostByDefault(t *testing.T) {
 
 func TestHandleRequestRejectsUnknownHostWhenUnconfiguredDestinationsDisabled(t *testing.T) {
 	srv := New(&config.Config{
-		AllowUnconfiguredDestinations: false,
+		BlockUnconfiguredDestinations: true,
 		Services: map[string]config.Service{
 			"github": {
 				MatchHost:                "api.github.com",

@@ -77,7 +77,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	matched, err := s.matchRoute(req)
 	if err != nil {
-		if errors.Is(err, errNoConfiguredService) && s.cfg.AllowUnconfiguredDestinations && req.URL.Hostname() != "" {
+		if errors.Is(err, errNoConfiguredService) && !s.cfg.BlockUnconfiguredDestinations && req.URL.Hostname() != "" {
 			s.logger.Info("request passed through", "method", req.Method, "host", req.URL.Host, "path", req.URL.Path)
 			return req, nil
 		}

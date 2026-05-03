@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newProxyTestServer(t *testing.T, allowUnconfigured bool) *httptest.Server {
+func newProxyTestServer(t *testing.T, blockUnconfigured bool) *httptest.Server {
 	t.Helper()
 	cfg := testServerConfig(t)
-	cfg.AllowUnconfiguredDestinations = allowUnconfigured
+	cfg.BlockUnconfiguredDestinations = blockUnconfigured
 	srv := NewWithLogger(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return httptest.NewServer(srv.httpServer.Handler)
 }
@@ -46,7 +46,7 @@ func TestE2EAllowsUnknownHTTPDestinationByDefault(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := newProxyTestServer(t, true)
+	proxy := newProxyTestServer(t, false)
 	defer proxy.Close()
 
 	resp, err := newHTTPClientWithProxy(t, proxy.URL).Get(upstream.URL)
@@ -65,7 +65,7 @@ func TestE2EBlocksUnknownHTTPDestinationWhenDisabled(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := newProxyTestServer(t, false)
+	proxy := newProxyTestServer(t, true)
 	defer proxy.Close()
 
 	resp, err := newHTTPClientWithProxy(t, proxy.URL).Get(upstream.URL)
@@ -85,7 +85,7 @@ func TestE2EAllowsUnknownHTTPSDestinationByDefault(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := newProxyTestServer(t, true)
+	proxy := newProxyTestServer(t, false)
 	defer proxy.Close()
 
 	resp, err := newHTTPSClientWithProxy(t, proxy.URL, upstream).Get(upstream.URL)
@@ -104,7 +104,7 @@ func TestE2EBlocksUnknownHTTPSDestinationWhenDisabled(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy := newProxyTestServer(t, false)
+	proxy := newProxyTestServer(t, true)
 	defer proxy.Close()
 
 	_, err := newHTTPSClientWithProxy(t, proxy.URL, upstream).Get(upstream.URL)

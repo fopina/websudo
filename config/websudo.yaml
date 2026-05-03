@@ -1,5 +1,5 @@
 listen: 127.0.0.1:8080
-allow_unconfigured_destinations: true
+block_unconfigured_destinations: false
 
 tls:
   generate_on_boot: true

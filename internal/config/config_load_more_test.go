@@ -84,7 +84,7 @@ func TestNormalizeServiceRejectsVariantWithoutPlaceholderMatch(t *testing.T) {
 	require.ErrorContains(t, err, "missing placeholder_contains")
 }
 
-func TestLoadDefaultsAllowUnconfiguredDestinationsToTrue(t *testing.T) {
+func TestLoadDefaultsBlockUnconfiguredDestinationsToFalse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "default-allow.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`services:
   github:
@@ -96,12 +96,12 @@ func TestLoadDefaultsAllowUnconfiguredDestinationsToTrue(t *testing.T) {
 
 	cfg, err := Load(path)
 	require.NoError(t, err)
-	require.True(t, cfg.AllowUnconfiguredDestinations)
+	require.False(t, cfg.BlockUnconfiguredDestinations)
 }
 
-func TestLoadAllowsDisablingUnconfiguredDestinations(t *testing.T) {
+func TestLoadAllowsEnablingBlockUnconfiguredDestinations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "deny-unknown.yaml")
-	require.NoError(t, os.WriteFile(path, []byte(`allow_unconfigured_destinations: false
+	require.NoError(t, os.WriteFile(path, []byte(`block_unconfigured_destinations: true
 services:
   github:
     match_host: api.github.com
@@ -112,5 +112,5 @@ services:
 
 	cfg, err := Load(path)
 	require.NoError(t, err)
-	require.False(t, cfg.AllowUnconfiguredDestinations)
+	require.True(t, cfg.BlockUnconfiguredDestinations)
 }

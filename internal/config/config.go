@@ -11,11 +11,10 @@ import (
 
 // Config is the top-level websudo configuration.
 type Config struct {
-	Listen                           string             `yaml:"listen"`
-	TLS                              TLSConfig          `yaml:"tls"`
-	AllowUnconfiguredDestinations    bool               `yaml:"allow_unconfigured_destinations"`
-	AllowUnconfiguredDestinationsSet bool               `yaml:"-"`
-	Services                         map[string]Service `yaml:"services"`
+	Listen                        string             `yaml:"listen"`
+	TLS                           TLSConfig          `yaml:"tls"`
+	BlockUnconfiguredDestinations bool               `yaml:"block_unconfigured_destinations"`
+	Services                      map[string]Service `yaml:"services"`
 }
 
 // TLSConfig controls CA storage and TLS handling.
@@ -64,15 +63,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("decode config %q: %w", path, err)
 	}
 	cfg.TLS.GenerateOnBootSet = strings.Contains(string(data), "generate_on_boot:")
-	cfg.AllowUnconfiguredDestinationsSet = strings.Contains(string(data), "allow_unconfigured_destinations:")
 
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
 	}
 	cfg.TLS = normalizeTLSConfig(cfg.TLS)
-	if !cfg.AllowUnconfiguredDestinationsSet {
-		cfg.AllowUnconfiguredDestinations = true
-	}
 	if len(cfg.Services) == 0 {
 		return nil, fmt.Errorf("config %q defines no services", path)
 	}

@@ -21,8 +21,7 @@ func testServerConfig(t *testing.T) *config.Config {
 	require.NoError(t, config.GenerateCA(certPath, keyPath))
 
 	return &config.Config{
-		Listen:                        "127.0.0.1:0",
-		AllowUnconfiguredDestinations: true,
+		Listen: "127.0.0.1:0",
 		TLS: config.TLSConfig{
 			CAcertPath: certPath,
 			CAkeyPath:  keyPath,

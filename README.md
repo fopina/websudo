@@ -16,7 +16,7 @@ Current v1 scaffold includes:
 - forward proxy mode using hostname matching
 - reverse proxy mode using explicit local route prefixes
 - default passthrough for destinations that are not explicitly configured
-- optional blocking of unconfigured destinations across both HTTP and HTTPS CONNECT
+- optional blocking of unconfigured destinations across both HTTP and HTTPS CONNECT with a default-off flag
 - method/path policy checks
 - placeholder credential validation
 - upstream credential injection from environment variables
@@ -37,7 +37,7 @@ Each service can define one or both of:
 - `route_prefix`: for reverse proxy requests, matched by local path prefix such as `/github`
 
 Top-level options:
-- `allow_unconfigured_destinations`: defaults to `true`; when `false`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
+- `block_unconfigured_destinations`: defaults to `false`; when `true`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
 
 Both modes use the same per-service fields:
 - `placeholder_auth`
@@ -108,7 +108,7 @@ Behavior:
 - reverse proxy requests are matched by route prefix and rewritten to the configured upstream
 - valid placeholder credentials are replaced with the configured upstream credentials
 - unconfigured HTTP and HTTPS destinations pass through by default
-- unconfigured HTTP and HTTPS destinations are blocked when `allow_unconfigured_destinations: false`
+- unconfigured HTTP and HTTPS destinations are blocked when `block_unconfigured_destinations: true`
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
 
