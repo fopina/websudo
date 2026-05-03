@@ -19,6 +19,7 @@ func TestLoad(t *testing.T) {
     base_url: https://api.github.com
     placeholder_auth: Authorization
     inject_auth: env:GITHUB_TOKEN
+    inject_auth_target: cookie:_session
     allowed_methods: [GET]
     allowed_paths:
       - /user
@@ -37,6 +38,8 @@ func TestLoad(t *testing.T) {
 	require.Contains(t, cfg.Services, "github")
 	require.Equal(t, "Bearer ph_", cfg.Services["github"].RequirePlaceholderPrefix)
 	require.Equal(t, "/github", cfg.Services["github"].RoutePrefix)
+	require.Equal(t, "cookie:_session", cfg.Services["github"].InjectAuthTarget)
+	require.NotEmpty(t, cfg.Services["github"].CookieEncryptionKeyPath)
 	require.Len(t, cfg.Services["github"].Variants, 1)
 }
 
@@ -65,4 +68,57 @@ func TestEffectiveServiceVariantOverride(t *testing.T) {
 	require.Equal(t, "repo-write", variantName)
 	require.Equal(t, []string{"/repos/*/*"}, effective.AllowedPaths)
 	require.Equal(t, "env:REPO_TOKEN", effective.InjectAuth)
+}
+
+func TestNormalizeServiceDefaultsInjectAuthTargetToPlaceholderAuth(t *testing.T) {
+	svc, err := normalizeService("github", Service{
+		MatchHost:       "api.github.com",
+		BaseURL:         "https://api.github.com",
+		PlaceholderAuth: "cookie:websudo_ph",
+		InjectAuth:      "env:GITHUB_SESSION",
+	}, t.TempDir())
+	require.NoError(t, err)
+	require.Equal(t, "cookie:websudo_ph", svc.InjectAuthTarget)
+}
+
+func TestEffectiveServiceVariantCanOverrideInjectAuthTarget(t *testing.T) {
+	service := Service{
+		PlaceholderAuth:  "Authorization",
+		InjectAuth:       "env:BASE_TOKEN",
+		InjectAuthTarget: "Authorization",
+		Variants: []Variant{{
+			Name:                "browser",
+			PlaceholderContains: "browser",
+			InjectAuthTarget:    "cookie:_session",
+		}},
+	}
+
+	effective, variantName := service.EffectiveService("Bearer ph_browser_123")
+	require.Equal(t, "browser", variantName)
+	require.Equal(t, "cookie:_session", effective.InjectAuthTarget)
+}
+
+func TestLoginCredentialsResolveEnvSources(t *testing.T) {
+	t.Setenv("UPSTREAM_USER", "boss")
+	t.Setenv("UPSTREAM_PASS", "swordfish")
+
+	username, password, err := (LoginConfig{Username: "env:UPSTREAM_USER", Password: "env:UPSTREAM_PASS"}).LoginCredentials()
+	require.NoError(t, err)
+	require.Equal(t, "boss", username)
+	require.Equal(t, "swordfish", password)
+}
+
+func TestCookieCipherKeyUsesResolvedSecret(t *testing.T) {
+	t.Setenv("COOKIE_SECRET", "secret-key")
+	key, err := (Service{CookieEncryptionKey: "env:COOKIE_SECRET"}).CookieCipherKey()
+	require.NoError(t, err)
+	require.Len(t, key, 32)
+}
+
+func TestCookieCipherKeyUsesPersistedSecretFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cookie.key")
+	require.NoError(t, os.WriteFile(path, []byte("persisted-secret\n"), 0o600))
+	key, err := (Service{CookieEncryptionKeyPath: path}).CookieCipherKey()
+	require.NoError(t, err)
+	require.Len(t, key, 32)
 }

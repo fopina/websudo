@@ -29,6 +29,11 @@ type matchedRoute struct {
 	path        string
 }
 
+type authTarget struct {
+	kind string
+	name string
+}
+
 var errNoConfiguredService = errors.New("no configured service matches request")
 
 // New creates a server from config.
@@ -104,14 +109,7 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 	if matched.path != req.URL.Path {
 		req.URL.Path = matched.path
 	}
-
-	if err := validateRequest(req, matched.service); err != nil {
-		s.logger.Warn("request denied", "service", matched.serviceName, "variant", matched.variantName, "host", req.URL.Host, "path", req.URL.Path, "error", err)
-		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
-	}
-
-	upstreamAuth, err := matched.service.InjectedAuthValue()
-	if err != nil {
+	if err := decryptRequestCookies(req, matched.service); err != nil {
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
 	}
 
@@ -120,21 +118,78 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, fmt.Sprintf("invalid base_url for %s", matched.serviceName))
 	}
 
+	var placeholderTarget *authTarget
+	if matched.service.PlaceholderAuth != "" {
+		parsedPlaceholderTarget, err := parseAuthTarget(matched.service.PlaceholderAuth)
+		if err != nil {
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+		}
+		placeholderTarget = &parsedPlaceholderTarget
+	}
+	var injectTarget *authTarget
+	if matched.service.InjectAuth != "" {
+		injectTargetRaw := matched.service.InjectAuthTarget
+		if injectTargetRaw == "" {
+			injectTargetRaw = matched.service.PlaceholderAuth
+		}
+		parsedInjectTarget, err := parseAuthTarget(injectTargetRaw)
+		if err != nil {
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+		}
+		injectTarget = &parsedInjectTarget
+	}
+
+	isLogin := isLoginRequest(req, matched.service)
+	if isLogin {
+		if err := rewriteLoginRequest(req, matched.service); err != nil {
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusBadRequest, err.Error())
+		}
+		if placeholderTarget != nil {
+			clearAuthValue(req, *placeholderTarget)
+		}
+	} else {
+		if err := validateRequest(req, matched.service); err != nil {
+			s.logger.Warn("request denied", "service", matched.serviceName, "variant", matched.variantName, "host", req.URL.Host, "path", req.URL.Path, "error", err)
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
+		}
+
+		if matched.service.InjectAuth != "" {
+			upstreamAuth, err := matched.service.InjectedAuthValue()
+			if err != nil {
+				return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+			}
+			if placeholderTarget != nil {
+				clearAuthValue(req, *placeholderTarget)
+			}
+			if injectTarget != nil {
+				setAuthValue(req, *injectTarget, upstreamAuth)
+			}
+		}
+	}
+
 	req.URL.Scheme = targetURL.Scheme
 	req.URL.Host = targetURL.Host
 	req.Host = targetURL.Host
 	req.URL.Path = joinURLPath(targetURL.Path, req.URL.Path)
 	req.RequestURI = ""
-	req.Header.Set(matched.service.PlaceholderAuth, upstreamAuth)
 
-	ctx.UserData = map[string]string{"service": matched.serviceName, "variant": matched.variantName}
-	s.logger.Info("request allowed", "service", matched.serviceName, "variant", matched.variantName, "method", req.Method, "path", req.URL.Path)
+	ctx.UserData = routeContext{serviceName: matched.serviceName, variantName: matched.variantName, service: matched.service}
+	s.logger.Info("request allowed", "service", matched.serviceName, "variant", matched.variantName, "method", req.Method, "path", req.URL.Path, "login", isLogin)
 	return req, nil
 }
 
 func (s *Server) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-	if resp != nil && ctx != nil && ctx.UserData != nil {
-		s.logger.Info("response proxied", "route", ctx.UserData)
+	if resp == nil {
+		return nil
+	}
+	if ctx != nil {
+		if route, ok := ctx.UserData.(routeContext); ok {
+			if err := encryptResponseCookies(resp, route.service); err != nil {
+				s.logger.Warn("response cookie encryption failed", "service", route.serviceName, "variant", route.variantName, "error", err)
+				return responseError(resp, resp.Request, http.StatusInternalServerError, err.Error())
+			}
+			s.logger.Info("response proxied", "service", route.serviceName, "variant", route.variantName)
+		}
 	}
 	return resp
 }
@@ -161,7 +216,10 @@ func writeResponse(w http.ResponseWriter, resp *http.Response) {
 func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
 	for name, svc := range s.cfg.Services {
 		if svc.RoutePrefix != "" && strings.HasPrefix(req.URL.Path, svc.RoutePrefix) {
-			placeholder := req.Header.Get(svc.PlaceholderAuth)
+			placeholder, err := getAuthValue(req, svc.PlaceholderAuth)
+			if err != nil {
+				return matchedRoute{}, err
+			}
 			effective, variantName := svc.EffectiveService(placeholder)
 			trimmedPath := strings.TrimPrefix(req.URL.Path, svc.RoutePrefix)
 			if trimmedPath == "" {
@@ -177,7 +235,10 @@ func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
 			continue
 		}
 
-		placeholder := req.Header.Get(svc.PlaceholderAuth)
+		placeholder, err := getAuthValue(req, svc.PlaceholderAuth)
+		if err != nil {
+			return matchedRoute{}, err
+		}
 		effective, variantName := svc.EffectiveService(placeholder)
 		return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: req.URL.Path}, nil
 	}
@@ -207,7 +268,14 @@ func validateRequest(req *http.Request, svc config.Service) error {
 		}
 	}
 
-	placeholder := req.Header.Get(svc.PlaceholderAuth)
+	if svc.Login.Path != "" || svc.PlaceholderAuth == "" {
+		return nil
+	}
+
+	placeholder, err := getAuthValue(req, svc.PlaceholderAuth)
+	if err != nil {
+		return err
+	}
 	if placeholder == "" {
 		return fmt.Errorf("missing placeholder credentials")
 	}
@@ -216,6 +284,106 @@ func validateRequest(req *http.Request, svc config.Service) error {
 	}
 
 	return nil
+}
+
+func getAuthValue(req *http.Request, rawTarget string) (string, error) {
+	if rawTarget == "" {
+		return "", nil
+	}
+	target, err := parseAuthTarget(rawTarget)
+	if err != nil {
+		return "", err
+	}
+
+	switch target.kind {
+	case "header":
+		return req.Header.Get(target.name), nil
+	case "cookie":
+		cookie, err := req.Cookie(target.name)
+		if errors.Is(err, http.ErrNoCookie) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		return cookie.Value, nil
+	default:
+		return "", fmt.Errorf("unsupported auth target kind %q", target.kind)
+	}
+}
+
+func setAuthValue(req *http.Request, target authTarget, value string) {
+	switch target.kind {
+	case "header":
+		req.Header.Set(target.name, value)
+	case "cookie":
+		setCookie(req, target.name, value)
+	}
+}
+
+func clearAuthValue(req *http.Request, target authTarget) {
+	switch target.kind {
+	case "header":
+		req.Header.Del(target.name)
+	case "cookie":
+		deleteCookie(req, target.name)
+	}
+}
+
+func parseAuthTarget(raw string) (authTarget, error) {
+	if raw == "" {
+		return authTarget{}, fmt.Errorf("auth target cannot be empty")
+	}
+	if !strings.Contains(raw, ":") {
+		return authTarget{kind: "header", name: raw}, nil
+	}
+
+	parts := strings.SplitN(raw, ":", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return authTarget{}, fmt.Errorf("invalid auth target %q", raw)
+	}
+	kind := strings.ToLower(parts[0])
+	if kind != "header" && kind != "cookie" {
+		return authTarget{}, fmt.Errorf("unsupported auth target %q", raw)
+	}
+	return authTarget{kind: kind, name: parts[1]}, nil
+}
+
+func setCookie(req *http.Request, name string, value string) {
+	cookies := req.Cookies()
+	updated := false
+	parts := make([]string, 0, len(cookies)+1)
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			cookie.Value = value
+			updated = true
+		}
+		parts = append(parts, cookie.String())
+	}
+	if !updated {
+		parts = append(parts, (&http.Cookie{Name: name, Value: value}).String())
+	}
+	if len(parts) == 0 {
+		req.Header.Del("Cookie")
+		return
+	}
+	req.Header.Set("Cookie", strings.Join(parts, "; "))
+}
+
+func deleteCookie(req *http.Request, name string) {
+	cookies := req.Cookies()
+	parts := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			continue
+		}
+		parts = append(parts, cookie.String())
+	}
+	if len(parts) == 0 {
+		req.Header.Del("Cookie")
+		return
+	}
+	req.Header.Set("Cookie", strings.Join(parts, "; "))
 }
 
 func containsFold(values []string, want string) bool {

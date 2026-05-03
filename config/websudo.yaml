@@ -50,3 +50,35 @@ services:
           - /user
           - /repos/*/*
           - /orgs/*
+
+  github-browser:
+    match_host: github.com
+    base_url: https://github.com
+    placeholder_auth: cookie:websudo_ph
+    require_placeholder_prefix: "ph_"
+    inject_auth: env:GITHUB_SESSION
+    inject_auth_target: cookie:user_session
+    cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
+    allowed_methods: [GET]
+    allowed_paths:
+      - /settings/profile
+
+  app-browser:
+    route_prefix: /app
+    base_url: https://internal.example.com
+    # cookies issued by upstream are encrypted before they reach the client;
+    # cookies that do not decrypt later are passed through unchanged.
+    # optional override; otherwise websudo generates a persisted key file next
+    # to the config automatically for cookie-based services.
+    cookie_encryption_key_path: ./app-browser.cookie-key
+    allowed_methods: [GET, POST]
+    allowed_paths:
+      - /dashboard
+    login:
+      # login.path is intentionally allowed without placeholder-auth gating so
+      # the upstream session can be established first.
+      path: /session
+      username_field: username
+      password_field: password
+      username: env:APP_LOGIN_USER
+      password: env:APP_LOGIN_PASS

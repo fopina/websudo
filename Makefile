@@ -32,12 +32,17 @@ e2e: ## run end-to-end tests
 ifdef WEBSUDO_E2E_COVERAGE_OUT
 	WEBSUDO_E2E_COVERAGE_OUT=$(WEBSUDO_E2E_COVERAGE_OUT).forward ./tests/e2e/test_forward_proxy.py
 	WEBSUDO_E2E_COVERAGE_OUT=$(WEBSUDO_E2E_COVERAGE_OUT).reverse ./tests/e2e/test_reverse_proxy.py
-	@if [ -f "$(WEBSUDO_E2E_COVERAGE_OUT).forward" ] && [ -f "$(WEBSUDO_E2E_COVERAGE_OUT).reverse" ]; then \
-		awk 'FNR == 1 && NR != 1 { next } { print }' $(WEBSUDO_E2E_COVERAGE_OUT).forward $(WEBSUDO_E2E_COVERAGE_OUT).reverse > $(WEBSUDO_E2E_COVERAGE_OUT); \
-	fi
+	WEBSUDO_E2E_COVERAGE_OUT=$(WEBSUDO_E2E_COVERAGE_OUT).defectdojo-forward ./tests/e2e/test_forward_proxy_defectdojo.py
+	WEBSUDO_E2E_COVERAGE_OUT=$(WEBSUDO_E2E_COVERAGE_OUT).defectdojo-reverse ./tests/e2e/test_reverse_proxy_defectdojo.py
+	@cat /dev/null > $(WEBSUDO_E2E_COVERAGE_OUT)
+	@for f in $(WEBSUDO_E2E_COVERAGE_OUT).forward $(WEBSUDO_E2E_COVERAGE_OUT).reverse $(WEBSUDO_E2E_COVERAGE_OUT).defectdojo-forward $(WEBSUDO_E2E_COVERAGE_OUT).defectdojo-reverse; do \
+		if [ -f "$$f" ]; then awk 'FNR == 1 && NR != 1 { next } { print }' "$$f" >> $(WEBSUDO_E2E_COVERAGE_OUT); fi; \
+	done
 else
 	./tests/e2e/test_forward_proxy.py
 	./tests/e2e/test_reverse_proxy.py
+	./tests/e2e/test_forward_proxy_defectdojo.py
+	./tests/e2e/test_reverse_proxy_defectdojo.py
 endif
 
 .PHONY: clean
