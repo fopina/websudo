@@ -36,6 +36,7 @@ type Service struct {
 	HeadersAllow             []string  `yaml:"headers_allow"`
 	PlaceholderAuth          string    `yaml:"placeholder_auth"`
 	InjectAuth               string    `yaml:"inject_auth"`
+	InjectAuthTarget         string    `yaml:"inject_auth_target"`
 	RequirePlaceholderPrefix string    `yaml:"require_placeholder_prefix"`
 	Variants                 []Variant `yaml:"variants"`
 }
@@ -48,6 +49,7 @@ type Variant struct {
 	AllowedPaths             []string `yaml:"allowed_paths"`
 	DeniedPaths              []string `yaml:"denied_paths"`
 	InjectAuth               string   `yaml:"inject_auth"`
+	InjectAuthTarget         string   `yaml:"inject_auth_target"`
 	RequirePlaceholderPrefix string   `yaml:"require_placeholder_prefix"`
 }
 
@@ -110,6 +112,9 @@ func normalizeService(name string, svc Service) (Service, error) {
 	if svc.InjectAuth == "" {
 		return Service{}, fmt.Errorf("service %q is missing inject_auth", name)
 	}
+	if svc.InjectAuthTarget == "" {
+		svc.InjectAuthTarget = svc.PlaceholderAuth
+	}
 	if svc.RequirePlaceholderPrefix == "" {
 		svc.RequirePlaceholderPrefix = "Bearer ph_"
 	}
@@ -126,6 +131,9 @@ func normalizeService(name string, svc Service) (Service, error) {
 		}
 		if variant.InjectAuth == "" {
 			variant.InjectAuth = svc.InjectAuth
+		}
+		if variant.InjectAuthTarget == "" {
+			variant.InjectAuthTarget = svc.InjectAuthTarget
 		}
 		if variant.RequirePlaceholderPrefix == "" {
 			variant.RequirePlaceholderPrefix = svc.RequirePlaceholderPrefix
@@ -145,6 +153,7 @@ func (s Service) EffectiveService(placeholder string) (Service, string) {
 			effective.AllowedPaths = chooseStrings(variant.AllowedPaths, s.AllowedPaths)
 			effective.DeniedPaths = chooseStrings(variant.DeniedPaths, s.DeniedPaths)
 			effective.InjectAuth = chooseString(variant.InjectAuth, s.InjectAuth)
+			effective.InjectAuthTarget = chooseString(variant.InjectAuthTarget, s.InjectAuthTarget)
 			effective.RequirePlaceholderPrefix = chooseString(variant.RequirePlaceholderPrefix, s.RequirePlaceholderPrefix)
 			return effective, variant.Name
 		}

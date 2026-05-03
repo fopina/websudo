@@ -50,3 +50,14 @@ services:
           - /user
           - /repos/*/*
           - /orgs/*
+
+  github-browser:
+    match_host: github.com
+    base_url: https://github.com
+    placeholder_auth: cookie:websudo_ph
+    require_placeholder_prefix: "ph_"
+    inject_auth: env:GITHUB_SESSION
+    inject_auth_target: cookie:user_session
+    allowed_methods: [GET]
+    allowed_paths:
+      - /settings/profile
