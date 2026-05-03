@@ -39,6 +39,7 @@ func TestLoad(t *testing.T) {
 	require.Equal(t, "Bearer ph_", cfg.Services["github"].RequirePlaceholderPrefix)
 	require.Equal(t, "/github", cfg.Services["github"].RoutePrefix)
 	require.Equal(t, "cookie:_session", cfg.Services["github"].InjectAuthTarget)
+	require.NotEmpty(t, cfg.Services["github"].CookieEncryptionKeyPath)
 	require.Len(t, cfg.Services["github"].Variants, 1)
 }
 
@@ -75,7 +76,7 @@ func TestNormalizeServiceDefaultsInjectAuthTargetToPlaceholderAuth(t *testing.T)
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "cookie:websudo_ph",
 		InjectAuth:      "env:GITHUB_SESSION",
-	})
+	}, t.TempDir())
 	require.NoError(t, err)
 	require.Equal(t, "cookie:websudo_ph", svc.InjectAuthTarget)
 }
@@ -110,6 +111,14 @@ func TestLoginCredentialsResolveEnvSources(t *testing.T) {
 func TestCookieCipherKeyUsesResolvedSecret(t *testing.T) {
 	t.Setenv("COOKIE_SECRET", "secret-key")
 	key, err := (Service{CookieEncryptionKey: "env:COOKIE_SECRET"}).CookieCipherKey()
+	require.NoError(t, err)
+	require.Len(t, key, 32)
+}
+
+func TestCookieCipherKeyUsesPersistedSecretFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cookie.key")
+	require.NoError(t, os.WriteFile(path, []byte("persisted-secret\n"), 0o600))
+	key, err := (Service{CookieEncryptionKeyPath: path}).CookieCipherKey()
 	require.NoError(t, err)
 	require.Len(t, key, 32)
 }

@@ -68,7 +68,9 @@ services:
     base_url: https://internal.example.com
     # cookies issued by upstream are encrypted before they reach the client;
     # cookies that do not decrypt later are passed through unchanged.
-    cookie_encryption_key: env:WEBSUDO_COOKIE_SECRET
+    # optional override; otherwise websudo generates a persisted key file next
+    # to the config automatically for cookie-based services.
+    cookie_encryption_key_path: ./app-browser.cookie-key
     allowed_methods: [GET, POST]
     allowed_paths:
       - /dashboard
