@@ -3,7 +3,7 @@ module github.com/fopina/websudo
 go 1.23.0
 
 require (
-	github.com/elazarl/goproxy v1.8.3
+	github.com/elazarl/goproxy v1.8.4
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1
