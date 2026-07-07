@@ -10,11 +10,29 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/fopina/websudo/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func newProxyTestServer(t *testing.T, blockUnconfigured bool) *httptest.Server {
 	t.Helper()
@@ -106,7 +124,7 @@ func TestE2ELogsUnknownHTTPDestinationWhenBlocked(t *testing.T) {
 
 	cfg := testServerConfig(t)
 	cfg.BlockUnconfiguredDestinations = true
-	var logs bytes.Buffer
+	var logs lockedBuffer
 	proxy := newProxyTestServerWithLogger(t, cfg, slog.New(slog.NewTextHandler(&logs, nil)))
 	defer proxy.Close()
 
@@ -170,7 +188,7 @@ func TestE2ELogsUnknownHTTPSConnectDestination(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := testServerConfig(t)
-	var logs bytes.Buffer
+	var logs lockedBuffer
 	proxy := newProxyTestServerWithLogger(t, cfg, slog.New(slog.NewTextHandler(&logs, nil)))
 	defer proxy.Close()
 
@@ -192,7 +210,7 @@ func TestE2ELogsUnknownHTTPSConnectDestinationWhenBlocked(t *testing.T) {
 
 	cfg := testServerConfig(t)
 	cfg.BlockUnconfiguredDestinations = true
-	var logs bytes.Buffer
+	var logs lockedBuffer
 	proxy := newProxyTestServerWithLogger(t, cfg, slog.New(slog.NewTextHandler(&logs, nil)))
 	defer proxy.Close()
 
