@@ -62,18 +62,26 @@ func TestInjectedAuthValueRejectsEmptyEnv(t *testing.T) {
 	require.ErrorContains(t, err, "resolved empty value")
 }
 
-func TestNormalizeServiceRejectsHeaderAuthWithLoginFields(t *testing.T) {
-	_, err := normalizeService("github", Service{
+func TestNormalizeServiceAllowsHeaderAuthWithLoginInsteadOfStaticInjectAuth(t *testing.T) {
+	tmp := t.TempDir()
+	svc, err := normalizeService("github", Service{
 		AuthMode:        AuthModeHeader,
 		MatchHost:       "github.com",
 		BaseURL:         "https://github.com",
 		PlaceholderAuth: "Authorization",
-		InjectAuth:      "env:GITHUB_TOKEN",
 		Login: LoginConfig{
-			UsernameField: "login",
+			Path:                "/session",
+			UsernameField:       "login",
+			PasswordField:       "password",
+			PlaceholderUsername: "app",
+			PlaceholderPassword: "app",
+			Username:            "env:UPSTREAM_USER",
+			Password:            "env:UPSTREAM_PASS",
 		},
-	}, t.TempDir())
-	require.ErrorContains(t, err, "auth_mode header cannot be combined with login fields")
+	}, tmp)
+	require.NoError(t, err)
+	require.Equal(t, "token", svc.Login.TokenField)
+	require.Equal(t, filepath.Join(tmp, ".github.cookie-encryption.key"), svc.CookieEncryptionKeyPath)
 }
 
 func TestNormalizeServiceRejectsHeaderAuthWithCookieEncryption(t *testing.T) {
@@ -86,6 +94,66 @@ func TestNormalizeServiceRejectsHeaderAuthWithCookieEncryption(t *testing.T) {
 		CookieEncryptionKeyPath: "cookie.key",
 	}, t.TempDir())
 	require.ErrorContains(t, err, "auth_mode header cannot be combined with cookie_encryption_key")
+}
+
+func TestNormalizeServiceRejectsHeaderAuthLoginWithoutPlaceholderCredentials(t *testing.T) {
+	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
+		MatchHost:       "github.com",
+		BaseURL:         "https://github.com",
+		PlaceholderAuth: "Authorization",
+		Login: LoginConfig{
+			Path:          "/session",
+			UsernameField: "login",
+			PasswordField: "password",
+			Username:      "env:UPSTREAM_USER",
+			Password:      "env:UPSTREAM_PASS",
+		},
+	}, t.TempDir())
+	require.ErrorContains(t, err, "auth_mode header with login requires login.placeholder_username and login.placeholder_password")
+}
+
+func TestNormalizeServiceRejectsHeaderAuthLoginWithStaticInjectAuth(t *testing.T) {
+	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
+		MatchHost:       "github.com",
+		BaseURL:         "https://github.com",
+		PlaceholderAuth: "Authorization",
+		InjectAuth:      "env:GITHUB_TOKEN",
+		Login: LoginConfig{
+			Path:                "/session",
+			UsernameField:       "login",
+			PasswordField:       "password",
+			PlaceholderUsername: "app",
+			PlaceholderPassword: "app",
+			Username:            "env:UPSTREAM_USER",
+			Password:            "env:UPSTREAM_PASS",
+		},
+	}, t.TempDir())
+	require.ErrorContains(t, err, "auth_mode header with login cannot be combined with inject_auth")
+}
+
+func TestNormalizeServiceRejectsHeaderAuthLoginWithVariants(t *testing.T) {
+	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
+		MatchHost:       "github.com",
+		BaseURL:         "https://github.com",
+		PlaceholderAuth: "Authorization",
+		Login: LoginConfig{
+			Path:                "/session",
+			UsernameField:       "login",
+			PasswordField:       "password",
+			PlaceholderUsername: "app",
+			PlaceholderPassword: "app",
+			Username:            "env:UPSTREAM_USER",
+			Password:            "env:UPSTREAM_PASS",
+		},
+		Variants: []Variant{{
+			Name:                "repo-write",
+			PlaceholderContains: "repo_write",
+		}},
+	}, t.TempDir())
+	require.ErrorContains(t, err, "auth_mode header with login cannot be combined with variants")
 }
 
 func TestNormalizeServiceRejectsCookieAuthWithoutLoginPath(t *testing.T) {

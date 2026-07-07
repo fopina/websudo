@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -27,6 +28,7 @@ type routeContext struct {
 	serviceName string
 	variantName string
 	service     config.Service
+	isLogin     bool
 }
 
 func isLoginRequest(req *http.Request, svc config.Service) bool {
@@ -144,6 +146,28 @@ func decryptRequestCookies(req *http.Request, svc config.Service) error {
 	return nil
 }
 
+func decryptRequestAuthToken(req *http.Request, svc config.Service) error {
+	if svc.AuthMode != config.AuthModeHeader || svc.Login.Path == "" {
+		return nil
+	}
+	key, err := svc.CookieCipherKey()
+	if err != nil || len(key) == 0 {
+		return err
+	}
+	header, err := loginAuthHeader(svc)
+	if err != nil {
+		return err
+	}
+	value := req.Header.Get(header)
+	if value == "" {
+		return nil
+	}
+	if decrypted, ok := decryptAuthHeaderValue(key, header, value); ok {
+		req.Header.Set(header, decrypted)
+	}
+	return nil
+}
+
 func encryptResponseCookies(resp *http.Response, svc config.Service) error {
 	key, err := svc.CookieCipherKey()
 	if err != nil || len(key) == 0 {
@@ -165,6 +189,97 @@ func encryptResponseCookies(resp *http.Response, svc config.Service) error {
 		resp.Header.Add("Set-Cookie", cookie.String())
 	}
 	return nil
+}
+
+func encryptLoginResponseAuthToken(resp *http.Response, svc config.Service) error {
+	if svc.AuthMode != config.AuthModeHeader || svc.Login.Path == "" || svc.Login.TokenField == "" || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil
+	}
+	key, err := svc.CookieCipherKey()
+	if err != nil || len(key) == 0 {
+		return err
+	}
+	header, err := loginAuthHeader(svc)
+	if err != nil {
+		return err
+	}
+	if resp.Body == nil {
+		return nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read login response body: %w", err)
+	}
+	_ = resp.Body.Close()
+	if strings.TrimSpace(string(body)) == "" {
+		setResponseBody(resp, body)
+		return nil
+	}
+
+	contentType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		contentType = strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+	}
+	if contentType != "" && !strings.EqualFold(contentType, "application/json") {
+		return fmt.Errorf("login token response content-type %q is not supported", resp.Header.Get("Content-Type"))
+	}
+
+	var values map[string]any
+	if err := json.Unmarshal(body, &values); err != nil {
+		return fmt.Errorf("parse login token response JSON body: %w", err)
+	}
+	if values == nil {
+		return fmt.Errorf("parse login token response JSON body: expected object")
+	}
+	rawToken, ok := values[svc.Login.TokenField]
+	if !ok {
+		return fmt.Errorf("login token response is missing token field %q", svc.Login.TokenField)
+	}
+	token, ok := rawToken.(string)
+	if !ok || token == "" {
+		return fmt.Errorf("login token response token field %q must be a non-empty string", svc.Login.TokenField)
+	}
+	encrypted, err := encryptCookieValue(key, header, token)
+	if err != nil {
+		return err
+	}
+	values[svc.Login.TokenField] = encrypted
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return fmt.Errorf("encode login token response JSON body: %w", err)
+	}
+	setResponseBody(resp, encoded)
+	return nil
+}
+
+func decryptAuthHeaderValue(key []byte, header string, value string) (string, bool) {
+	if plaintext, ok := decryptCookieValue(key, header, value); ok {
+		return plaintext, true
+	}
+	index := strings.LastIndex(value, " "+encryptedCookiePrefix)
+	if index < 0 {
+		return "", false
+	}
+	encrypted := value[index+1:]
+	plaintext, ok := decryptCookieValue(key, header, encrypted)
+	if !ok {
+		return "", false
+	}
+	return value[:index+1] + plaintext, true
+}
+
+func loginAuthHeader(svc config.Service) (string, error) {
+	target := svc.InjectAuthTarget
+	if target == "" {
+		target = svc.PlaceholderAuth
+	}
+	return parseHeaderAuthTarget(target)
+}
+
+func setResponseBody(resp *http.Response, body []byte) {
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 }
 
 func encryptCookieValue(key []byte, name string, value string) (string, error) {
