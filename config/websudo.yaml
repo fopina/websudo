@@ -79,3 +79,25 @@ services:
       # use "env:" variables if setting up with real ones
       username: admin
       password: "1Defectdojo@demo#appsec"
+
+  dojo-api:
+    auth_mode: header
+    route_prefix: /dojoapi
+    base_url: https://pro.demo.defectdojo.com
+    placeholder_auth: Authorization
+    # DefectDojo API tokens are sent upstream as "Authorization: Token <token>".
+    cookie_encryption_key_path: ./dojo-api.token-key.test
+    allowed_methods: [GET, POST]
+    login:
+      path: /api/v2/api-token-auth/
+      username_field: username
+      password_field: password
+      # token_field defaults to "token"; included here to make the API response contract explicit.
+      token_field: token
+      placeholder_username: app
+      placeholder_password: app
+      # THESE ARE NOT SECRETS - public demo credentials from:
+      # https://github.com/DefectDojo/django-DefectDojo/#demo
+      # use "env:" variables if setting up with real ones
+      username: admin
+      password: "1Defectdojo@demo#appsec"
