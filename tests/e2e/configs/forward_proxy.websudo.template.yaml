@@ -1,12 +1,12 @@
 listen: {listen}
 
 tls:
-  generate_on_boot: true
   ca_cert_path: {ca_cert_path}
   ca_key_path: {ca_key_path}
 
 services:
   github:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization

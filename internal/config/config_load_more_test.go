@@ -28,36 +28,40 @@ func TestLoadRejectsMissingServices(t *testing.T) {
 
 func TestNormalizeServiceRejectsMissingBaseURL(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		PlaceholderAuth: "Authorization",
 		InjectAuth:      "env:GITHUB_TOKEN",
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing base_url")
 }
 
 func TestNormalizeServiceRejectsMissingPlaceholderAuth(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:   AuthModeHeader,
 		MatchHost:  "api.github.com",
 		BaseURL:    "https://api.github.com",
 		InjectAuth: "env:GITHUB_TOKEN",
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing placeholder_auth")
 }
 
 func TestNormalizeServiceRejectsMissingInjectAuth(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "Authorization",
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing inject_auth")
 }
 
 func TestNormalizeServiceRejectsVariantWithoutName(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "Authorization",
@@ -65,13 +69,14 @@ func TestNormalizeServiceRejectsVariantWithoutName(t *testing.T) {
 		Variants: []Variant{{
 			PlaceholderContains: "repo",
 		}},
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing name")
 }
 
 func TestNormalizeServiceRejectsVariantWithoutPlaceholderMatch(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "Authorization",
@@ -79,7 +84,7 @@ func TestNormalizeServiceRejectsVariantWithoutPlaceholderMatch(t *testing.T) {
 		Variants: []Variant{{
 			Name: "repo-write",
 		}},
-	})
+	}, t.TempDir())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "missing placeholder_contains")
 }
@@ -88,6 +93,7 @@ func TestLoadDefaultsBlockUnconfiguredDestinationsToFalse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "default-allow.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`services:
   github:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -104,6 +110,7 @@ func TestLoadAllowsEnablingBlockUnconfiguredDestinations(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(`block_unconfigured_destinations: true
 services:
   github:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization

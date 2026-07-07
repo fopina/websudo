@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,6 +33,18 @@ func TestValidateRequestRejectsWrongPlaceholderPrefix(t *testing.T) {
 		AllowedPaths:             []string{"/user"},
 	})
 	require.ErrorContains(t, err, "placeholder credentials do not match required prefix")
+}
+
+func TestValidateRequestRejectsCookiePlaceholderTarget(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://api.github.com/user", nil)
+
+	err := validateRequest(req, config.Service{
+		PlaceholderAuth:          "cookie:websudo_ph",
+		RequirePlaceholderPrefix: "ph_",
+		AllowedMethods:           []string{http.MethodGet},
+		AllowedPaths:             []string{"/user"},
+	})
+	require.ErrorContains(t, err, "unsupported auth target")
 }
 
 func TestHandleRequestForwardProxyReplacesPlaceholderCredentials(t *testing.T) {
@@ -180,6 +193,60 @@ func TestHandleRequestReverseProxyModeUsesRoutePrefix(t *testing.T) {
 	require.Equal(t, "upstream.internal", outReq.URL.Host)
 	require.Equal(t, "/api/user", outReq.URL.Path)
 	require.Equal(t, "Bearer live_token", outReq.Header.Get("Authorization"))
+}
+
+func TestHandleRequestReverseProxyDeniedPathIncludesRequestedAndUpstreamPaths(t *testing.T) {
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"app": {
+			RoutePrefix:    "/app",
+			BaseURL:        "https://upstream.internal",
+			AllowedMethods: []string{http.MethodGet},
+			AllowedPaths:   []string{"/dashboard"},
+			Login: config.LoginConfig{
+				Path:          "/session",
+				UsernameField: "username",
+				PasswordField: "password",
+				Username:      "env:APP_LOGIN_USER",
+				Password:      "env:APP_LOGIN_PASS",
+			},
+		},
+	}})
+
+	req := httptest.NewRequest(http.MethodGet, "http://websudo.local/app", nil)
+
+	_, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.NotNil(t, resp)
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "path /app is not allowed (/ upstream)")
+}
+
+func TestNonProxyHandlerRejectsUnconfiguredPathBeforeAllowedPathValidation(t *testing.T) {
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"app": {
+			RoutePrefix:    "/app",
+			BaseURL:        "https://upstream.internal",
+			AllowedMethods: []string{http.MethodGet},
+			AllowedPaths:   []string{"/dashboard"},
+			Login: config.LoginConfig{
+				Path:          "/session",
+				UsernameField: "username",
+				PasswordField: "password",
+				Username:      "env:APP_LOGIN_USER",
+				Password:      "env:APP_LOGIN_PASS",
+			},
+		},
+	}})
+
+	req := httptest.NewRequest(http.MethodGet, "/random", nil)
+	rec := httptest.NewRecorder()
+
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "no configured service matches request")
+	require.NotContains(t, rec.Body.String(), "is not allowed")
 }
 
 func TestHandleRequestReverseProxyVariantUsesDifferentAllowedPathAndCredential(t *testing.T) {

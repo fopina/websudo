@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"log/slog"
 	"path/filepath"
 	"testing"
 
@@ -33,13 +35,25 @@ func TestApplyTLSConfigLoadsCustomCA(t *testing.T) {
 		CAkeyPath:  keyPath,
 	}}
 
-	require.NoError(t, applyTLSConfig(proxy, cfg))
+	require.NoError(t, applyTLSConfig(proxy, cfg, slog.Default()))
 }
 
 func TestApplyTLSConfigErrorsWhenCAIsMissing(t *testing.T) {
 	proxy := goproxy.NewProxyHttpServer()
-	err := applyTLSConfig(proxy, &config.Config{TLS: config.TLSConfig{CAcertPath: "/missing/ca.pem", CAkeyPath: "/missing/ca-key.pem"}})
+	err := applyTLSConfig(proxy, &config.Config{TLS: config.TLSConfig{CAcertPath: "/missing/ca.pem", CAkeyPath: "/missing/ca-key.pem"}}, slog.Default())
 	require.Error(t, err)
+}
+
+func TestLogForwardConnectRecordsHostnameAndAction(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	logForwardConnect(logger, "gitlab.com:443", "passthrough")
+
+	require.Contains(t, logs.String(), "forward CONNECT unmatched")
+	require.Contains(t, logs.String(), "host=gitlab.com")
+	require.Contains(t, logs.String(), "connect_host=gitlab.com:443")
+	require.Contains(t, logs.String(), "action=passthrough")
 }
 
 func TestShouldInterceptTLSMatchesConfiguredHost(t *testing.T) {

@@ -19,7 +19,8 @@ Current v1 scaffold includes:
 - optional blocking of unconfigured destinations across both HTTP and HTTPS CONNECT with a default-off flag
 - method/path policy checks
 - placeholder credential validation
-- upstream credential injection from environment variables
+- upstream credential injection from environment variables into headers
+- encrypted upstream session-cookie round-tripping for browser-style form and JSON logins
 - per-placeholder-token variants for the same host or route
 - unit and e2e tests for credential validation, proxy routing, passthrough, and credential replacement
 
@@ -38,21 +39,42 @@ Each service can define one or both of:
 
 Top-level options:
 - `block_unconfigured_destinations`: defaults to `false`; when `true`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
+- `tls.require_existing_ca`: defaults to `false`; when `true`, startup fails if CA files are missing instead of generating a local CA certificate and key for TLS interception
+- `tls.ca_cert_path` and `tls.ca_key_path`: optional CA certificate/key paths; default to `~/.local/share/websudo/ca.pem` and `~/.local/share/websudo/ca-key.pem`
 
-Both modes use the same per-service fields:
-- `placeholder_auth`
+Path values such as `tls.ca_cert_path`, `tls.ca_key_path`, and `cookie_encryption_key_path` support `~` and `~/...` expansion to the current user's home directory. Relative `cookie_encryption_key_path` values are resolved relative to the config file.
+
+Each service must choose one authentication mode with `auth_mode`.
+
+`auth_mode: header` validates a client placeholder header on every request, then replaces it with the configured upstream header value. If the placeholder header is missing or does not match `require_placeholder_prefix`, the request is rejected before upstream auth is injected.
+
+Header injection fields:
+- `placeholder_auth` (`Authorization` is shorthand for `header:Authorization`)
 - `require_placeholder_prefix`
 - `inject_auth`
+- `inject_auth_target` (defaults to the same target as `placeholder_auth`)
+- `variants`
+
+`auth_mode: cookie` requires `login.path`, `login.placeholder_username`, and `login.placeholder_password`. The login request validates those placeholder form/JSON credentials, rewrites only that login body to the configured upstream username/password, and encrypts upstream session cookies before returning them to the client. Later requests rely only on those encrypted cookies being decrypted before forwarding upstream; no header auth is injected outside the login request.
+
+Cookie auth fields:
+- `login.path`, `login.username_field`, `login.password_field`, `login.placeholder_username`, `login.placeholder_password`, `login.username`, `login.password`
+- `cookie_encryption_key` (optional explicit secret or `env:...` override for login session-cookie encryption)
+- `cookie_encryption_key_path` (optional override for the persisted login cookie secret file; defaults to a generated file next to the config for login services)
+
+Cookie auth cannot be combined with header injection fields: `placeholder_auth`, `require_placeholder_prefix`, `inject_auth`, `inject_auth_target`, or `variants`.
+
+Policy fields supported by both modes:
 - `allowed_methods`
 - `allowed_paths`
 - `denied_paths`
-- `variants`
 
 ## Example: forward proxy by hostname
 
 ```yaml
 services:
   github-forward:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -78,6 +100,7 @@ Behavior:
 ```yaml
 services:
   github-reverse:
+    auth_mode: header
     route_prefix: /github
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -100,17 +123,54 @@ Behavior:
 - request to `/github/user` maps to upstream `/user`
 - request to `/github/repos/fopina/websudo` only works when the placeholder token selects a variant that allows that path
 
+## Example: upstream login capture for browser sessions
+
+```yaml
+services:
+  app-browser:
+    auth_mode: cookie
+    route_prefix: /app
+    base_url: https://internal.example.com
+    cookie_encryption_key_path: ./app-browser.cookie-key
+    allowed_methods: [GET, POST]
+    allowed_paths:
+      - /dashboard
+    login:
+      path: /session
+      username_field: username
+      password_field: password
+      placeholder_username: app
+      placeholder_password: app
+      username: env:APP_LOGIN_USER
+      password: env:APP_LOGIN_PASS
+```
+
+Behavior:
+- POST `/app/session` is intentionally exempt from header placeholder-auth gating so the login flow can establish the upstream session, and the rest of the service can rely on the encrypted session cookies instead
+- `username` and `password` form fields, or top-level JSON keys with those names, must match `placeholder_username` and `placeholder_password`
+- after placeholder credential validation, those fields are replaced with the configured upstream `username` and `password`
+- JSON login bodies must be objects; nested JSON fields are not supported, so configured field names are treated as literal top-level keys
+- upstream `Set-Cookie` headers are encrypted before they reach the client
+- if `cookie_encryption_key` is omitted, websudo generates and persists a default key file next to the config (or at `cookie_encryption_key_path` if set)
+- later client `Cookie` headers are decrypted before forwarding upstream
+- if a client cookie cannot be decrypted, it is forwarded as-is
+
 ## Validation covered by tests
 
 - requests without placeholder credentials are rejected
 - requests with non-placeholder credentials are rejected
 - forward proxy requests are matched by hostname and rewritten to the configured upstream
 - reverse proxy requests are matched by route prefix and rewritten to the configured upstream
-- valid placeholder credentials are replaced with the configured upstream credentials
+- valid placeholder credentials are replaced with the configured upstream credentials in the configured header target
 - unconfigured HTTP and HTTPS destinations pass through by default
 - unconfigured HTTP and HTTPS destinations are blocked when `block_unconfigured_destinations: true`
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
+- upstream login form fields or top-level JSON keys can be validated against configured placeholder credentials and replaced with configured upstream credentials on a specific login endpoint
+- nested JSON login fields are not supported
+- upstream Set-Cookie headers can be encrypted and client cookies decrypted on the way back in
+- undecryptable client cookies are intentionally forwarded as-is
+- login endpoints configured under `login.path` are intentionally allowed without header placeholder-auth gating
 
 ## Next steps
 
@@ -122,3 +182,15 @@ Behavior:
 ## Build
 
 Check out [CONTRIBUTING.md](CONTRIBUTING.md)
+
+
+## Live e2e test credentials
+
+GitHub-backed e2e tests use `WEBSUDO_E2E_GITHUB_AUTH`.
+
+DefectDojo-backed e2e tests use:
+- `WEBSUDO_E2E_DEFECTDOJO_USERNAME`
+- `WEBSUDO_E2E_DEFECTDOJO_PASSWORD`
+- `WEBSUDO_E2E_COOKIE_SECRET` (optional; defaults to a test secret)
+
+When the DefectDojo credentials are not set, those live tests are skipped.
