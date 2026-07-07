@@ -1,10 +1,11 @@
-listen: 127.0.0.1:8080
-block_unconfigured_destinations: false
+## default values
+# listen: 127.0.0.1:8080
+# block_unconfigured_destinations: false
 
-tls:
-  generate_on_boot: true
-  ca_cert_path: ~/.local/share/websudo/ca.pem
-  ca_key_path: ~/.local/share/websudo/ca-key.pem
+# tls:
+#   generate_on_boot: true
+#   ca_cert_path: ~/.local/share/websudo/ca.pem
+#   ca_key_path: ~/.local/share/websudo/ca-key.pem
 
 services:
   github-forward:
@@ -67,6 +68,8 @@ services:
       path: /login
       username_field: username
       password_field: password
+      # Client-submitted username/password values are currently not validated;
+      # websudo rewrites any submitted values in these fields before proxying.
       # Public demo credentials from:
       # https://github.com/DefectDojo/django-DefectDojo/#demo
       # use "env:" variables if setting up with real ones
