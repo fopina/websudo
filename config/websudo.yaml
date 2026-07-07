@@ -51,22 +51,24 @@ services:
           - /repos/*/*
           - /orgs/*
 
-  app-browser:
-    route_prefix: /app
-    base_url: https://internal.example.com
+  dojo-browser:
+    # defectdojo has HSTS so you need to add websudo CA as trusted CA to your browser/system to be able to connect to it via this setup
+    match_host: demo.defectdojo.org
+    base_url: https://demo.defectdojo.org
     # cookies issued by upstream are encrypted before they reach the client;
     # cookies that do not decrypt later are passed through unchanged.
     # optional override; otherwise websudo generates a persisted key file next
     # to the config automatically for login services.
-    cookie_encryption_key_path: ./app-browser.cookie-key
+    cookie_encryption_key_path: ./app-browser.cookie-key.test
     allowed_methods: [GET, POST]
-    allowed_paths:
-      - /dashboard
     login:
       # login.path is intentionally allowed without placeholder-auth gating so
       # the upstream session can be established first.
-      path: /session
+      path: /login
       username_field: username
       password_field: password
-      username: env:APP_LOGIN_USER
-      password: env:APP_LOGIN_PASS
+      # Public demo credentials from:
+      # https://github.com/DefectDojo/django-DefectDojo/#demo
+      # use "env:" variables if setting up with real ones
+      username: admin
+      password: "1Defectdojo@demo#appsec"
