@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -85,6 +87,39 @@ func TestRunReturnsServerErrors(t *testing.T) {
 	srv := &Server{httpServer: &http.Server{Addr: "127.0.0.1:-1"}}
 	err := srv.Run(context.Background())
 	require.Error(t, err)
+}
+
+func TestLogStartupIncludesListeningAddressAndConfigSummary(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	cfg := &config.Config{
+		Listen: "127.0.0.1:0",
+		Services: map[string]config.Service{
+			"reverse": {
+				RoutePrefix: "/github",
+				BaseURL:     "https://api.github.com",
+			},
+			"forward": {
+				MatchHost: "demo.defectdojo.org",
+				BaseURL:   "https://demo.defectdojo.org",
+			},
+		},
+	}
+	srv := &Server{cfg: cfg, logger: logger, httpServer: &http.Server{Addr: cfg.Listen}}
+	listener, err := net.Listen("tcp", cfg.Listen)
+	require.NoError(t, err)
+	defer listener.Close()
+
+	srv.logStartup(listener)
+
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	require.NoError(t, err)
+	require.Contains(t, logs.String(), "proxy listening")
+	require.Contains(t, logs.String(), "127.0.0.1:"+port)
+	require.Contains(t, logs.String(), "ports=[")
+	require.Contains(t, logs.String(), port)
+	require.Contains(t, logs.String(), "forward base_url=https://demo.defectdojo.org modes=forward(match_host=demo.defectdojo.org)")
+	require.Contains(t, logs.String(), "reverse base_url=https://api.github.com modes=reverse(route_prefix=/github)")
 }
 
 func TestRunShutsDownOnContextCancel(t *testing.T) {

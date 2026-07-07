@@ -19,7 +19,7 @@ func TestLoad(t *testing.T) {
     base_url: https://api.github.com
     placeholder_auth: Authorization
     inject_auth: env:GITHUB_TOKEN
-    inject_auth_target: cookie:_session
+    inject_auth_target: header:X-GitHub-Auth
     allowed_methods: [GET]
     allowed_paths:
       - /user
@@ -38,8 +38,8 @@ func TestLoad(t *testing.T) {
 	require.Contains(t, cfg.Services, "github")
 	require.Equal(t, "Bearer ph_", cfg.Services["github"].RequirePlaceholderPrefix)
 	require.Equal(t, "/github", cfg.Services["github"].RoutePrefix)
-	require.Equal(t, "cookie:_session", cfg.Services["github"].InjectAuthTarget)
-	require.NotEmpty(t, cfg.Services["github"].CookieEncryptionKeyPath)
+	require.Equal(t, "header:X-GitHub-Auth", cfg.Services["github"].InjectAuthTarget)
+	require.Empty(t, cfg.Services["github"].CookieEncryptionKeyPath)
 	require.Len(t, cfg.Services["github"].Variants, 1)
 }
 
@@ -74,11 +74,43 @@ func TestNormalizeServiceDefaultsInjectAuthTargetToPlaceholderAuth(t *testing.T)
 	svc, err := normalizeService("github", Service{
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
+		PlaceholderAuth: "header:X-Placeholder-Auth",
+		InjectAuth:      "env:GITHUB_TOKEN",
+	}, t.TempDir())
+	require.NoError(t, err)
+	require.Equal(t, "header:X-Placeholder-Auth", svc.InjectAuthTarget)
+}
+
+func TestNormalizeServiceRejectsCookieAuthTargets(t *testing.T) {
+	_, err := normalizeService("github", Service{
+		MatchHost:       "github.com",
+		BaseURL:         "https://github.com",
 		PlaceholderAuth: "cookie:websudo_ph",
 		InjectAuth:      "env:GITHUB_SESSION",
 	}, t.TempDir())
+	require.ErrorContains(t, err, "unsupported auth target")
+}
+
+func TestNormalizeServiceExpandsHomeCookieEncryptionKeyPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	svc, err := normalizeService("browser", Service{
+		RoutePrefix:             "/app",
+		BaseURL:                 "https://app.internal",
+		CookieEncryptionKey:     "static-secret",
+		CookieEncryptionKeyPath: "~/websudo/app.cookie-key",
+		Login: LoginConfig{
+			Path:          "/session",
+			UsernameField: "username",
+			PasswordField: "password",
+			Username:      "env:APP_USER",
+			Password:      "env:APP_PASS",
+		},
+	}, t.TempDir())
+
 	require.NoError(t, err)
-	require.Equal(t, "cookie:websudo_ph", svc.InjectAuthTarget)
+	require.Equal(t, filepath.Join(home, "websudo", "app.cookie-key"), svc.CookieEncryptionKeyPath)
 }
 
 func TestEffectiveServiceVariantCanOverrideInjectAuthTarget(t *testing.T) {
@@ -89,13 +121,13 @@ func TestEffectiveServiceVariantCanOverrideInjectAuthTarget(t *testing.T) {
 		Variants: []Variant{{
 			Name:                "browser",
 			PlaceholderContains: "browser",
-			InjectAuthTarget:    "cookie:_session",
+			InjectAuthTarget:    "header:X-Upstream-Auth",
 		}},
 	}
 
 	effective, variantName := service.EffectiveService("Bearer ph_browser_123")
 	require.Equal(t, "browser", variantName)
-	require.Equal(t, "cookie:_session", effective.InjectAuthTarget)
+	require.Equal(t, "header:X-Upstream-Auth", effective.InjectAuthTarget)
 }
 
 func TestLoginCredentialsResolveEnvSources(t *testing.T) {

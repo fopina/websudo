@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/elazarl/goproxy"
@@ -27,11 +29,7 @@ type matchedRoute struct {
 	variantName string
 	service     config.Service
 	path        string
-}
-
-type authTarget struct {
-	kind string
-	name string
+	requestPath string
 }
 
 var errNoConfiguredService = errors.New("no configured service matches request")
@@ -46,7 +44,7 @@ func NewWithLogger(cfg *config.Config, logger *slog.Logger) *Server {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = false
 	if cfg.TLS.CAcertPath != "" && cfg.TLS.CAkeyPath != "" {
-		if err := applyTLSConfig(proxy, cfg); err != nil {
+		if err := applyTLSConfig(proxy, cfg, logger); err != nil {
 			panic(err)
 		}
 	}
@@ -68,17 +66,92 @@ func NewWithLogger(cfg *config.Config, logger *slog.Logger) *Server {
 
 // Run starts the server.
 func (s *Server) Run(ctx context.Context) error {
+	listener, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		return err
+	}
+	s.logStartup(listener)
+
 	go func() {
 		<-ctx.Done()
 		_ = s.httpServer.Shutdown(context.Background())
 	}()
 
-	err := s.httpServer.ListenAndServe()
+	err = s.httpServer.Serve(listener)
 	if err != nil && err != http.ErrServerClosed {
 		return err
 	}
 
 	return nil
+}
+
+func (s *Server) logStartup(listener net.Listener) {
+	var services map[string]config.Service
+	if s.cfg != nil {
+		services = s.cfg.Services
+	}
+
+	s.log().Info(
+		"proxy listening",
+		"configured_listen", s.httpServer.Addr,
+		"addresses", listenerAddresses(listener),
+		"ports", listenerPorts(listener),
+		"services", serviceConfigSummaries(services),
+	)
+}
+
+func (s *Server) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
+func listenerAddresses(listener net.Listener) []string {
+	if listener == nil || listener.Addr() == nil {
+		return nil
+	}
+	return []string{listener.Addr().String()}
+}
+
+func listenerPorts(listener net.Listener) []string {
+	if listener == nil || listener.Addr() == nil {
+		return nil
+	}
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		return nil
+	}
+	return []string{port}
+}
+
+func serviceConfigSummaries(services map[string]config.Service) []string {
+	names := make([]string, 0, len(services))
+	for name := range services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	summaries := make([]string, 0, len(names))
+	for _, name := range names {
+		svc := services[name]
+		summaries = append(summaries, fmt.Sprintf("%s base_url=%s modes=%s", name, svc.BaseURL, strings.Join(serviceModes(svc), ",")))
+	}
+	return summaries
+}
+
+func serviceModes(svc config.Service) []string {
+	modes := make([]string, 0, 2)
+	if svc.MatchHost != "" {
+		modes = append(modes, fmt.Sprintf("forward(match_host=%s)", svc.MatchHost))
+	}
+	if svc.RoutePrefix != "" {
+		modes = append(modes, fmt.Sprintf("reverse(route_prefix=%s)", svc.RoutePrefix))
+	}
+	if len(modes) == 0 {
+		return []string{"unmatched"}
+	}
+	return modes
 }
 
 func (s *Server) handleNonProxyRequest(w http.ResponseWriter, req *http.Request) {
@@ -99,9 +172,12 @@ func (s *Server) handleNonProxyRequest(w http.ResponseWriter, req *http.Request)
 func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 	matched, err := s.matchRoute(req)
 	if err != nil {
-		if errors.Is(err, errNoConfiguredService) && !s.cfg.BlockUnconfiguredDestinations && req.URL.Hostname() != "" {
-			s.logger.Info("request passed through", "method", req.Method, "host", req.URL.Host, "path", req.URL.Path)
-			return req, nil
+		if errors.Is(err, errNoConfiguredService) && req.URL.Hostname() != "" {
+			if !s.cfg.BlockUnconfiguredDestinations {
+				s.log().Info("request passed through", "method", req.Method, "host", req.URL.Host, "path", req.URL.Path)
+				return req, nil
+			}
+			s.log().Info("request blocked unconfigured", "method", req.Method, "host", req.URL.Host, "path", req.URL.Path)
 		}
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
 	}
@@ -118,25 +194,25 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, fmt.Sprintf("invalid base_url for %s", matched.serviceName))
 	}
 
-	var placeholderTarget *authTarget
+	var placeholderHeader string
 	if matched.service.PlaceholderAuth != "" {
-		parsedPlaceholderTarget, err := parseAuthTarget(matched.service.PlaceholderAuth)
+		parsedPlaceholderHeader, err := parseHeaderAuthTarget(matched.service.PlaceholderAuth)
 		if err != nil {
 			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
 		}
-		placeholderTarget = &parsedPlaceholderTarget
+		placeholderHeader = parsedPlaceholderHeader
 	}
-	var injectTarget *authTarget
+	var injectHeader string
 	if matched.service.InjectAuth != "" {
 		injectTargetRaw := matched.service.InjectAuthTarget
 		if injectTargetRaw == "" {
 			injectTargetRaw = matched.service.PlaceholderAuth
 		}
-		parsedInjectTarget, err := parseAuthTarget(injectTargetRaw)
+		parsedInjectHeader, err := parseHeaderAuthTarget(injectTargetRaw)
 		if err != nil {
 			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
 		}
-		injectTarget = &parsedInjectTarget
+		injectHeader = parsedInjectHeader
 	}
 
 	isLogin := isLoginRequest(req, matched.service)
@@ -144,13 +220,13 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 		if err := rewriteLoginRequest(req, matched.service); err != nil {
 			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusBadRequest, err.Error())
 		}
-		if placeholderTarget != nil {
-			clearAuthValue(req, *placeholderTarget)
+		if placeholderHeader != "" {
+			req.Header.Del(placeholderHeader)
 		}
 	} else {
 		if err := validateRequest(req, matched.service); err != nil {
-			s.logger.Warn("request denied", "service", matched.serviceName, "variant", matched.variantName, "host", req.URL.Host, "path", req.URL.Path, "error", err)
-			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, err.Error())
+			s.log().Warn("request denied", "service", matched.serviceName, "variant", matched.variantName, "host", req.URL.Host, "requested_path", matched.requestPath, "upstream_path", req.URL.Path, "error", err)
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, validationErrorMessage(err, matched))
 		}
 
 		if matched.service.InjectAuth != "" {
@@ -158,11 +234,11 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 			if err != nil {
 				return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
 			}
-			if placeholderTarget != nil {
-				clearAuthValue(req, *placeholderTarget)
+			if placeholderHeader != "" {
+				req.Header.Del(placeholderHeader)
 			}
-			if injectTarget != nil {
-				setAuthValue(req, *injectTarget, upstreamAuth)
+			if injectHeader != "" {
+				req.Header.Set(injectHeader, upstreamAuth)
 			}
 		}
 	}
@@ -174,7 +250,7 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 	req.RequestURI = ""
 
 	ctx.UserData = routeContext{serviceName: matched.serviceName, variantName: matched.variantName, service: matched.service}
-	s.logger.Info("request allowed", "service", matched.serviceName, "variant", matched.variantName, "method", req.Method, "path", req.URL.Path, "login", isLogin)
+	s.log().Info("request allowed", "service", matched.serviceName, "variant", matched.variantName, "method", req.Method, "path", req.URL.Path, "login", isLogin)
 	return req, nil
 }
 
@@ -185,10 +261,10 @@ func (s *Server) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *htt
 	if ctx != nil {
 		if route, ok := ctx.UserData.(routeContext); ok {
 			if err := encryptResponseCookies(resp, route.service); err != nil {
-				s.logger.Warn("response cookie encryption failed", "service", route.serviceName, "variant", route.variantName, "error", err)
+				s.log().Warn("response cookie encryption failed", "service", route.serviceName, "variant", route.variantName, "error", err)
 				return responseError(resp, resp.Request, http.StatusInternalServerError, err.Error())
 			}
-			s.logger.Info("response proxied", "service", route.serviceName, "variant", route.variantName)
+			s.log().Info("response proxied", "service", route.serviceName, "variant", route.variantName)
 		}
 	}
 	return resp
@@ -215,23 +291,20 @@ func writeResponse(w http.ResponseWriter, resp *http.Response) {
 
 func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
 	for name, svc := range s.cfg.Services {
-		if svc.RoutePrefix != "" && strings.HasPrefix(req.URL.Path, svc.RoutePrefix) {
+		if svc.RoutePrefix != "" && routePrefixMatches(req.URL.Path, svc.RoutePrefix) {
 			placeholder, err := getAuthValue(req, svc.PlaceholderAuth)
 			if err != nil {
 				return matchedRoute{}, err
 			}
 			effective, variantName := svc.EffectiveService(placeholder)
-			trimmedPath := strings.TrimPrefix(req.URL.Path, svc.RoutePrefix)
-			if trimmedPath == "" {
-				trimmedPath = "/"
-			}
-			return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: trimmedPath}, nil
+			trimmedPath := trimRoutePrefix(req.URL.Path, svc.RoutePrefix)
+			return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: trimmedPath, requestPath: req.URL.Path}, nil
 		}
 	}
 
 	host := req.URL.Hostname()
 	for name, svc := range s.cfg.Services {
-		if !strings.EqualFold(host, svc.MatchHost) {
+		if svc.MatchHost == "" || !strings.EqualFold(host, svc.MatchHost) {
 			continue
 		}
 
@@ -240,10 +313,45 @@ func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
 			return matchedRoute{}, err
 		}
 		effective, variantName := svc.EffectiveService(placeholder)
-		return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: req.URL.Path}, nil
+		return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: req.URL.Path, requestPath: req.URL.Path}, nil
 	}
 
 	return matchedRoute{}, fmt.Errorf("%w host %q or path %q", errNoConfiguredService, host, req.URL.Path)
+}
+
+func routePrefixMatches(requestPath string, routePrefix string) bool {
+	prefix := normalizedRoutePrefix(routePrefix)
+	return requestPath == prefix || strings.HasPrefix(requestPath, prefix+"/") || prefix == "/"
+}
+
+func trimRoutePrefix(requestPath string, routePrefix string) string {
+	prefix := normalizedRoutePrefix(routePrefix)
+	if prefix == "/" {
+		return requestPath
+	}
+	trimmedPath := strings.TrimPrefix(requestPath, prefix)
+	if trimmedPath == "" {
+		return "/"
+	}
+	return trimmedPath
+}
+
+func normalizedRoutePrefix(routePrefix string) string {
+	if routePrefix == "/" {
+		return routePrefix
+	}
+	return strings.TrimRight(routePrefix, "/")
+}
+
+func validationErrorMessage(err error, matched matchedRoute) string {
+	if matched.requestPath == "" || matched.requestPath == matched.path {
+		return err.Error()
+	}
+	message := err.Error()
+	if !strings.Contains(message, matched.path) {
+		return message
+	}
+	return fmt.Sprintf("%s (%s upstream)", strings.Replace(message, matched.path, matched.requestPath, 1), matched.path)
 }
 
 func validateRequest(req *http.Request, svc config.Service) error {
@@ -290,100 +398,30 @@ func getAuthValue(req *http.Request, rawTarget string) (string, error) {
 	if rawTarget == "" {
 		return "", nil
 	}
-	target, err := parseAuthTarget(rawTarget)
+	header, err := parseHeaderAuthTarget(rawTarget)
 	if err != nil {
 		return "", err
 	}
 
-	switch target.kind {
-	case "header":
-		return req.Header.Get(target.name), nil
-	case "cookie":
-		cookie, err := req.Cookie(target.name)
-		if errors.Is(err, http.ErrNoCookie) {
-			return "", nil
-		}
-		if err != nil {
-			return "", err
-		}
-		return cookie.Value, nil
-	default:
-		return "", fmt.Errorf("unsupported auth target kind %q", target.kind)
-	}
+	return req.Header.Get(header), nil
 }
 
-func setAuthValue(req *http.Request, target authTarget, value string) {
-	switch target.kind {
-	case "header":
-		req.Header.Set(target.name, value)
-	case "cookie":
-		setCookie(req, target.name, value)
-	}
-}
-
-func clearAuthValue(req *http.Request, target authTarget) {
-	switch target.kind {
-	case "header":
-		req.Header.Del(target.name)
-	case "cookie":
-		deleteCookie(req, target.name)
-	}
-}
-
-func parseAuthTarget(raw string) (authTarget, error) {
+func parseHeaderAuthTarget(raw string) (string, error) {
 	if raw == "" {
-		return authTarget{}, fmt.Errorf("auth target cannot be empty")
+		return "", fmt.Errorf("auth target cannot be empty")
 	}
 	if !strings.Contains(raw, ":") {
-		return authTarget{kind: "header", name: raw}, nil
+		return raw, nil
 	}
 
 	parts := strings.SplitN(raw, ":", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return authTarget{}, fmt.Errorf("invalid auth target %q", raw)
+		return "", fmt.Errorf("invalid auth target %q", raw)
 	}
-	kind := strings.ToLower(parts[0])
-	if kind != "header" && kind != "cookie" {
-		return authTarget{}, fmt.Errorf("unsupported auth target %q", raw)
+	if !strings.EqualFold(parts[0], "header") {
+		return "", fmt.Errorf("unsupported auth target %q", raw)
 	}
-	return authTarget{kind: kind, name: parts[1]}, nil
-}
-
-func setCookie(req *http.Request, name string, value string) {
-	cookies := req.Cookies()
-	updated := false
-	parts := make([]string, 0, len(cookies)+1)
-	for _, cookie := range cookies {
-		if cookie.Name == name {
-			cookie.Value = value
-			updated = true
-		}
-		parts = append(parts, cookie.String())
-	}
-	if !updated {
-		parts = append(parts, (&http.Cookie{Name: name, Value: value}).String())
-	}
-	if len(parts) == 0 {
-		req.Header.Del("Cookie")
-		return
-	}
-	req.Header.Set("Cookie", strings.Join(parts, "; "))
-}
-
-func deleteCookie(req *http.Request, name string) {
-	cookies := req.Cookies()
-	parts := make([]string, 0, len(cookies))
-	for _, cookie := range cookies {
-		if cookie.Name == name {
-			continue
-		}
-		parts = append(parts, cookie.String())
-	}
-	if len(parts) == 0 {
-		req.Header.Del("Cookie")
-		return
-	}
-	req.Header.Set("Cookie", strings.Join(parts, "; "))
+	return parts[1], nil
 }
 
 func containsFold(values []string, want string) bool {

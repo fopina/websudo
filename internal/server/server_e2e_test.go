@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"io"
@@ -26,6 +27,12 @@ func newProxyTestServer(t *testing.T, blockUnconfigured bool) *httptest.Server {
 func newProxyTestServerFromConfig(t *testing.T, cfg *config.Config) *httptest.Server {
 	t.Helper()
 	srv := NewWithLogger(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return httptest.NewServer(srv.httpServer.Handler)
+}
+
+func newProxyTestServerWithLogger(t *testing.T, cfg *config.Config, logger *slog.Logger) *httptest.Server {
+	t.Helper()
+	srv := NewWithLogger(cfg, logger)
 	return httptest.NewServer(srv.httpServer.Handler)
 }
 
@@ -91,6 +98,28 @@ func TestE2EAllowsUnknownHTTPDestinationByDefault(t *testing.T) {
 	require.Equal(t, "http passthrough ok", string(body))
 }
 
+func TestE2ELogsUnknownHTTPDestinationWhenBlocked(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("request should not reach upstream")
+	}))
+	defer upstream.Close()
+
+	cfg := testServerConfig(t)
+	cfg.BlockUnconfiguredDestinations = true
+	var logs bytes.Buffer
+	proxy := newProxyTestServerWithLogger(t, cfg, slog.New(slog.NewTextHandler(&logs, nil)))
+	defer proxy.Close()
+
+	resp, err := newHTTPClientWithProxy(t, proxy.URL).Get(upstream.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Contains(t, logs.String(), "request blocked unconfigured")
+	require.Contains(t, logs.String(), "method=GET")
+	require.Contains(t, logs.String(), "host="+upstream.Listener.Addr().String())
+}
+
 func TestE2EBlocksUnknownHTTPDestinationWhenDisabled(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("request should not reach upstream")
@@ -131,6 +160,48 @@ func TestE2EAllowsUnknownHTTPSDestinationByDefault(t *testing.T) {
 	require.NotNil(t, resp.TLS)
 	require.Len(t, resp.TLS.PeerCertificates, 1)
 	require.Equal(t, upstream.Certificate().Raw, resp.TLS.PeerCertificates[0].Raw)
+}
+
+func TestE2ELogsUnknownHTTPSConnectDestination(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("https passthrough ok"))
+	}))
+	defer upstream.Close()
+
+	cfg := testServerConfig(t)
+	var logs bytes.Buffer
+	proxy := newProxyTestServerWithLogger(t, cfg, slog.New(slog.NewTextHandler(&logs, nil)))
+	defer proxy.Close()
+
+	resp, err := newHTTPSClientWithProxy(t, proxy.URL, upstream).Get(upstream.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	require.Contains(t, logs.String(), "forward CONNECT unmatched")
+	require.Contains(t, logs.String(), "connect_host="+upstream.Listener.Addr().String())
+	require.Contains(t, logs.String(), "action=passthrough")
+}
+
+func TestE2ELogsUnknownHTTPSConnectDestinationWhenBlocked(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("request should not reach upstream")
+	}))
+	defer upstream.Close()
+
+	cfg := testServerConfig(t)
+	cfg.BlockUnconfiguredDestinations = true
+	var logs bytes.Buffer
+	proxy := newProxyTestServerWithLogger(t, cfg, slog.New(slog.NewTextHandler(&logs, nil)))
+	defer proxy.Close()
+
+	_, err := newHTTPSClientWithProxy(t, proxy.URL, upstream).Get(upstream.URL)
+	require.Error(t, err)
+
+	require.Contains(t, logs.String(), "forward CONNECT unmatched")
+	require.Contains(t, logs.String(), "connect_host="+upstream.Listener.Addr().String())
+	require.Contains(t, logs.String(), "action=rejected")
 }
 
 func TestE2EConfiguredHTTPSInterceptsWithProxyCertificate(t *testing.T) {

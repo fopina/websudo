@@ -19,7 +19,7 @@ Current v1 scaffold includes:
 - optional blocking of unconfigured destinations across both HTTP and HTTPS CONNECT with a default-off flag
 - method/path policy checks
 - placeholder credential validation
-- upstream credential injection from environment variables into headers or cookies
+- upstream credential injection from environment variables into headers
 - encrypted upstream session-cookie round-tripping for browser-style logins
 - per-placeholder-token variants for the same host or route
 - unit and e2e tests for credential validation, proxy routing, passthrough, and credential replacement
@@ -39,17 +39,21 @@ Each service can define one or both of:
 
 Top-level options:
 - `block_unconfigured_destinations`: defaults to `false`; when `true`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
+- `tls.generate_on_boot`: defaults to `true`; when CA files are missing, generate a local CA certificate and key for TLS interception
+- `tls.ca_cert_path` and `tls.ca_key_path`: optional CA certificate/key paths; default to `~/.local/share/websudo/ca.pem` and `~/.local/share/websudo/ca-key.pem`
+
+Path values such as `tls.ca_cert_path`, `tls.ca_key_path`, and `cookie_encryption_key_path` support `~` and `~/...` expansion to the current user's home directory. Relative `cookie_encryption_key_path` values are resolved relative to the config file.
 
 Both modes use the same per-service fields:
-- `placeholder_auth` (`Authorization` is shorthand for `header:Authorization`; `cookie:name` is also supported)
+- `placeholder_auth` (`Authorization` is shorthand for `header:Authorization`)
 - `require_placeholder_prefix`
 - `inject_auth`
 - `inject_auth_target` (defaults to the same target as `placeholder_auth`)
 - `allowed_methods`
 - `allowed_paths`
 - `denied_paths`
-- `cookie_encryption_key` (optional explicit secret or `env:...` override)
-- `cookie_encryption_key_path` (optional override for the persisted secret file; defaults to a generated file next to the config)
+- `cookie_encryption_key` (optional explicit secret or `env:...` override for login session-cookie encryption)
+- `cookie_encryption_key_path` (optional override for the persisted login cookie secret file; defaults to a generated file next to the config for login services)
 - `login.path`, `login.username_field`, `login.password_field`, `login.username`, `login.password`
 - `variants`
 
@@ -105,32 +109,6 @@ Behavior:
 - request to `/github/user` maps to upstream `/user`
 - request to `/github/repos/fopina/websudo` only works when the placeholder token selects a variant that allows that path
 
-## Example: browser session cookie injection
-
-```yaml
-services:
-  github-browser:
-    match_host: github.com
-    base_url: https://github.com
-    placeholder_auth: cookie:websudo_ph
-    require_placeholder_prefix: "ph_"
-    inject_auth: env:GITHUB_SESSION
-    inject_auth_target: cookie:user_session
-    cookie_encryption_key_path: ./app-browser.cookie-key
-    allowed_methods: [GET]
-    allowed_paths:
-      - /settings/profile
-```
-
-Behavior:
-- request with cookie `websudo_ph=ph_browser_demo` is accepted
-- upstream receives `user_session=<real value from env:GITHUB_SESSION>`
-- the placeholder cookie is removed before the request is forwarded
-- upstream `Set-Cookie` values are encrypted before they are returned to the client
-- if no explicit `cookie_encryption_key` is configured, websudo generates and persists a secret file next to the config by default
-- encrypted client cookies are decrypted before upstream requests
-- client cookies that do not decrypt are forwarded upstream unchanged (intentional passthrough, not a validation failure)
-
 ## Example: upstream login capture for browser sessions
 
 ```yaml
@@ -164,12 +142,11 @@ Behavior:
 - requests with non-placeholder credentials are rejected
 - forward proxy requests are matched by hostname and rewritten to the configured upstream
 - reverse proxy requests are matched by route prefix and rewritten to the configured upstream
-- valid placeholder credentials are replaced with the configured upstream credentials in the configured header or cookie target
+- valid placeholder credentials are replaced with the configured upstream credentials in the configured header target
 - unconfigured HTTP and HTTPS destinations pass through by default
 - unconfigured HTTP and HTTPS destinations are blocked when `block_unconfigured_destinations: true`
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
-- placeholder cookies can be validated and swapped for upstream session cookies
 - upstream login form fields can be replaced with configured credentials on a specific login endpoint
 - upstream Set-Cookie headers can be encrypted and client cookies decrypted on the way back in
 - undecryptable client cookies are intentionally forwarded as-is

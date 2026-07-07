@@ -69,14 +69,18 @@ func TestNormalizeServiceAllowsLoginWithoutInjectedAuth(t *testing.T) {
 	require.NotEmpty(t, svc.CookieEncryptionKeyPath)
 }
 
-func TestNormalizeServiceGeneratesDefaultCookieKeyPath(t *testing.T) {
+func TestNormalizeServiceGeneratesDefaultLoginCookieKeyPath(t *testing.T) {
 	tmp := t.TempDir()
 	svc, err := normalizeService("github", Service{
-		MatchHost:        "github.com",
-		BaseURL:          "https://github.com",
-		PlaceholderAuth:  "cookie:websudo_ph",
-		InjectAuth:       "env:GITHUB_SESSION",
-		InjectAuthTarget: "cookie:user_session",
+		MatchHost: "github.com",
+		BaseURL:   "https://github.com",
+		Login: LoginConfig{
+			Path:          "/session",
+			UsernameField: "login",
+			PasswordField: "password",
+			Username:      "env:UPSTREAM_USER",
+			Password:      "env:UPSTREAM_PASS",
+		},
 	}, tmp)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(tmp, ".github.cookie-encryption.key"), svc.CookieEncryptionKeyPath)
@@ -90,10 +94,14 @@ func TestNormalizeServiceResolvesRelativeCookieKeyPath(t *testing.T) {
 	svc, err := normalizeService("github", Service{
 		MatchHost:               "github.com",
 		BaseURL:                 "https://github.com",
-		PlaceholderAuth:         "cookie:websudo_ph",
-		InjectAuth:              "env:GITHUB_SESSION",
-		InjectAuthTarget:        "cookie:user_session",
 		CookieEncryptionKeyPath: "secrets/websudo.key",
+		Login: LoginConfig{
+			Path:          "/session",
+			UsernameField: "login",
+			PasswordField: "password",
+			Username:      "env:UPSTREAM_USER",
+			Password:      "env:UPSTREAM_PASS",
+		},
 	}, tmp)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(tmp, "secrets", "websudo.key"), svc.CookieEncryptionKeyPath)

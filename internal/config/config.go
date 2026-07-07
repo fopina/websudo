@@ -105,9 +105,13 @@ func normalizeTLSConfig(tls TLSConfig) TLSConfig {
 	baseDir := filepath.Join(userHomeDir(), ".local", "share", "websudo")
 	if tls.CAcertPath == "" {
 		tls.CAcertPath = filepath.Join(baseDir, "ca.pem")
+	} else {
+		tls.CAcertPath = expandHomePath(tls.CAcertPath)
 	}
 	if tls.CAkeyPath == "" {
 		tls.CAkeyPath = filepath.Join(baseDir, "ca-key.pem")
+	} else {
+		tls.CAkeyPath = expandHomePath(tls.CAkeyPath)
 	}
 	if !tls.GenerateOnBootSet {
 		tls.GenerateOnBoot = true
@@ -128,8 +132,18 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 	if svc.InjectAuth == "" && svc.Login.Path == "" {
 		return Service{}, fmt.Errorf("service %q is missing inject_auth", name)
 	}
-	if svc.InjectAuthTarget == "" && svc.PlaceholderAuth != "" {
-		svc.InjectAuthTarget = svc.PlaceholderAuth
+	if svc.PlaceholderAuth != "" {
+		if _, err := parseHeaderAuthTarget(svc.PlaceholderAuth); err != nil {
+			return Service{}, fmt.Errorf("service %q placeholder_auth: %w", name, err)
+		}
+		if svc.InjectAuthTarget == "" {
+			svc.InjectAuthTarget = svc.PlaceholderAuth
+		}
+	}
+	if svc.InjectAuthTarget != "" {
+		if _, err := parseHeaderAuthTarget(svc.InjectAuthTarget); err != nil {
+			return Service{}, fmt.Errorf("service %q inject_auth_target: %w", name, err)
+		}
 	}
 	if svc.RequirePlaceholderPrefix == "" {
 		svc.RequirePlaceholderPrefix = "Bearer ph_"
@@ -137,8 +151,11 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 	if svc.RoutePrefix != "" && !strings.HasPrefix(svc.RoutePrefix, "/") {
 		svc.RoutePrefix = "/" + svc.RoutePrefix
 	}
-	if svc.CookieEncryptionKeyPath != "" && !filepath.IsAbs(svc.CookieEncryptionKeyPath) {
-		svc.CookieEncryptionKeyPath = filepath.Join(configDir, svc.CookieEncryptionKeyPath)
+	if svc.CookieEncryptionKeyPath != "" {
+		svc.CookieEncryptionKeyPath = expandHomePath(svc.CookieEncryptionKeyPath)
+		if !filepath.IsAbs(svc.CookieEncryptionKeyPath) {
+			svc.CookieEncryptionKeyPath = filepath.Join(configDir, svc.CookieEncryptionKeyPath)
+		}
 	}
 	if svc.needsCookieEncryption() {
 		if svc.CookieEncryptionKeyPath == "" {
@@ -183,6 +200,11 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 		if variant.InjectAuthTarget == "" {
 			variant.InjectAuthTarget = svc.InjectAuthTarget
 		}
+		if variant.InjectAuthTarget != "" {
+			if _, err := parseHeaderAuthTarget(variant.InjectAuthTarget); err != nil {
+				return Service{}, fmt.Errorf("service %q variant %q inject_auth_target: %w", name, variant.Name, err)
+			}
+		}
 		if variant.RequirePlaceholderPrefix == "" {
 			variant.RequirePlaceholderPrefix = svc.RequirePlaceholderPrefix
 		}
@@ -193,12 +215,7 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 }
 
 func (s Service) needsCookieEncryption() bool {
-	if s.Login.Path != "" {
-		return true
-	}
-	placeholderTarget, _ := parseAuthTargetShorthand(s.PlaceholderAuth)
-	injectTarget, _ := parseAuthTargetShorthand(s.InjectAuthTarget)
-	return placeholderTarget == "cookie" || injectTarget == "cookie"
+	return s.Login.Path != ""
 }
 
 // EffectiveService returns the base service merged with the matching variant, if any.
@@ -315,18 +332,21 @@ func readSecretFile(path string) (string, error) {
 	return value, nil
 }
 
-func parseAuthTargetShorthand(raw string) (string, string) {
+func parseHeaderAuthTarget(raw string) (string, error) {
 	if raw == "" {
-		return "", ""
+		return "", fmt.Errorf("auth target cannot be empty")
 	}
 	if !strings.Contains(raw, ":") {
-		return "header", raw
+		return raw, nil
 	}
 	parts := strings.SplitN(raw, ":", 2)
-	if len(parts) != 2 {
-		return "", ""
+	if len(parts) != 2 || parts[1] == "" {
+		return "", fmt.Errorf("invalid auth target %q", raw)
 	}
-	return strings.ToLower(parts[0]), parts[1]
+	if !strings.EqualFold(parts[0], "header") {
+		return "", fmt.Errorf("unsupported auth target %q", raw)
+	}
+	return parts[1], nil
 }
 
 func chooseString(primary string, fallback string) string {
@@ -349,4 +369,14 @@ func userHomeDir() string {
 		return "."
 	}
 	return home
+}
+
+func expandHomePath(path string) string {
+	if path == "~" {
+		return userHomeDir()
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(userHomeDir(), strings.TrimPrefix(path, "~/"))
+	}
+	return path
 }

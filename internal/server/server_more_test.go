@@ -63,6 +63,35 @@ func TestMatchRouteUsesVariantInReverseMode(t *testing.T) {
 	require.Equal(t, "/orgs/fopina", matched.path)
 }
 
+func TestMatchRouteRequiresRoutePrefixPathBoundary(t *testing.T) {
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"app": {
+			RoutePrefix: "/app",
+			BaseURL:     "https://reverse.internal",
+			Login: config.LoginConfig{
+				Path:          "/session",
+				UsernameField: "username",
+				PasswordField: "password",
+				Username:      "env:APP_LOGIN_USER",
+				Password:      "env:APP_LOGIN_PASS",
+			},
+		},
+	}})
+
+	for _, path := range []string{"/app", "/app/", "/app/dashboard"} {
+		req := httptest.NewRequest(http.MethodGet, "http://websudo.local"+path, nil)
+		matched, err := srv.matchRoute(req)
+		require.NoError(t, err)
+		require.Equal(t, "app", matched.serviceName)
+	}
+
+	for _, path := range []string{"/app2", "/application"} {
+		req := httptest.NewRequest(http.MethodGet, "http://websudo.local"+path, nil)
+		_, err := srv.matchRoute(req)
+		require.ErrorIs(t, err, errNoConfiguredService)
+	}
+}
+
 func TestValidateRequestRejectsDeniedPath(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://api.github.com/user/emails", nil)
 	req.Header.Set("Authorization", "Bearer ph_demo")

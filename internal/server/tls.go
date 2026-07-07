@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/fopina/websudo/internal/config"
 )
 
-func applyTLSConfig(proxy *goproxy.ProxyHttpServer, cfg *config.Config) error {
+func applyTLSConfig(proxy *goproxy.ProxyHttpServer, cfg *config.Config, logger *slog.Logger) error {
 	ca, err := loadCA(cfg.TLS.CAcertPath, cfg.TLS.CAkeyPath)
 	if err != nil {
 		return err
@@ -27,12 +28,21 @@ func applyTLSConfig(proxy *goproxy.ProxyHttpServer, cfg *config.Config) error {
 			return mitmAction, host
 		}
 		if cfg.BlockUnconfiguredDestinations {
+			logForwardConnect(logger, host, "rejected")
 			return goproxy.RejectConnect, host
 		}
+		logForwardConnect(logger, host, "passthrough")
 		return goproxy.OkConnect, host
 	})
 
 	return nil
+}
+
+func logForwardConnect(logger *slog.Logger, connectHost string, action string) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Info("forward CONNECT unmatched", "host", stripPort(connectHost), "connect_host", connectHost, "action", action)
 }
 
 func shouldInterceptTLS(cfg *config.Config, host string) bool {

@@ -17,6 +17,19 @@ func TestNormalizeTLSConfigDefaults(t *testing.T) {
 	require.Contains(t, tlsCfg.CAkeyPath, filepath.Join(".local", "share", "websudo", "ca-key.pem"))
 }
 
+func TestNormalizeTLSConfigExpandsHomePaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tlsCfg := normalizeTLSConfig(TLSConfig{
+		CAcertPath: "~/certs/websudo-ca.pem",
+		CAkeyPath:  "~/certs/websudo-ca-key.pem",
+	})
+
+	require.Equal(t, filepath.Join(home, "certs", "websudo-ca.pem"), tlsCfg.CAcertPath)
+	require.Equal(t, filepath.Join(home, "certs", "websudo-ca-key.pem"), tlsCfg.CAkeyPath)
+}
+
 func TestEnsureTLSAssetsUsesDefaultPathsWhenMissing(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := &Config{TLS: normalizeTLSConfig(TLSConfig{})}
