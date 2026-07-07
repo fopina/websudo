@@ -217,6 +217,12 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 
 	isLogin := isLoginRequest(req, matched.service)
 	if isLogin {
+		if matched.service.PlaceholderAuth != "" {
+			if err := validatePlaceholderCredentials(req, matched.service); err != nil {
+				s.log().Warn("login request denied", "service", matched.serviceName, "variant", matched.variantName, "host", req.URL.Host, "requested_path", matched.requestPath, "upstream_path", req.URL.Path, "error", err)
+				return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, validationErrorMessage(err, matched))
+			}
+		}
 		if err := rewriteLoginRequest(req, matched.service); err != nil {
 			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusBadRequest, err.Error())
 		}
@@ -380,6 +386,10 @@ func validateRequest(req *http.Request, svc config.Service) error {
 		return nil
 	}
 
+	return validatePlaceholderCredentials(req, svc)
+}
+
+func validatePlaceholderCredentials(req *http.Request, svc config.Service) error {
 	placeholder, err := getAuthValue(req, svc.PlaceholderAuth)
 	if err != nil {
 		return err

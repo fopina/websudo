@@ -60,17 +60,21 @@ services:
     # cookies that do not decrypt later are passed through unchanged.
     # optional override; otherwise websudo generates a persisted key file next
     # to the config automatically for login services.
+    # Client login POSTs must include: Authorization: Bearer app
+    placeholder_auth: Authorization
+    require_placeholder_prefix: "Bearer app"
     cookie_encryption_key_path: ./app-browser.cookie-key.test
     allowed_methods: [GET, POST]
     login:
       # login.path is intentionally allowed without placeholder-auth gating so
-      # the upstream session can be established first.
+      # the upstream session can be established first, unless placeholder_auth
+      # is configured as it is here.
       path: /login
       username_field: username
       password_field: password
       # Client-submitted username/password values are currently not validated;
       # websudo rewrites any submitted values in these fields before proxying.
-      # Public demo credentials from:
+      # THESE ARE NOT SECRETS - public demo credentials from:
       # https://github.com/DefectDojo/django-DefectDojo/#demo
       # use "env:" variables if setting up with real ones
       username: admin

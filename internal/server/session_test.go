@@ -48,6 +48,66 @@ func TestHandleRequestLoginReplacesConfiguredCredentials(t *testing.T) {
 	require.Empty(t, outReq.Header.Get("Authorization"))
 }
 
+func TestHandleRequestLoginCanRequirePlaceholderToken(t *testing.T) {
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"github": {
+			RoutePrefix:              "/github",
+			BaseURL:                  "https://upstream.internal",
+			PlaceholderAuth:          "Authorization",
+			RequirePlaceholderPrefix: "Bearer app",
+			CookieEncryptionKey:      "env:COOKIE_SECRET",
+			Login: config.LoginConfig{
+				Path:          "/session",
+				UsernameField: "login",
+				PasswordField: "password",
+				Username:      "boss",
+				Password:      "swordfish",
+			},
+		},
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "http://websudo.local/github/session", strings.NewReader("login=fake&password=wrong"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	_, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.NotNil(t, resp)
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestHandleRequestLoginWithPlaceholderTokenRewritesAndStripsToken(t *testing.T) {
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"github": {
+			RoutePrefix:              "/github",
+			BaseURL:                  "https://upstream.internal",
+			PlaceholderAuth:          "Authorization",
+			RequirePlaceholderPrefix: "Bearer app",
+			CookieEncryptionKey:      "env:COOKIE_SECRET",
+			Login: config.LoginConfig{
+				Path:          "/session",
+				UsernameField: "login",
+				PasswordField: "password",
+				Username:      "boss",
+				Password:      "swordfish",
+			},
+		},
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "http://websudo.local/github/session", strings.NewReader("login=fake&password=wrong"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer app")
+
+	outReq, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.Nil(t, resp)
+	require.Empty(t, outReq.Header.Get("Authorization"))
+	body, err := io.ReadAll(outReq.Body)
+	require.NoError(t, err)
+	require.Equal(t, "login=boss&password=swordfish", string(body))
+}
+
 func TestHandleRequestLoginReplacesConfiguredJSONCredentials(t *testing.T) {
 	t.Setenv("UPSTREAM_USER", "boss")
 	t.Setenv("UPSTREAM_PASS", "swordfish")
