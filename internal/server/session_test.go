@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -45,6 +46,75 @@ func TestHandleRequestLoginReplacesConfiguredCredentials(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "login=boss&password=swordfish&remember_me=1", string(body))
 	require.Empty(t, outReq.Header.Get("Authorization"))
+}
+
+func TestHandleRequestLoginReplacesConfiguredJSONCredentials(t *testing.T) {
+	t.Setenv("UPSTREAM_USER", "boss")
+	t.Setenv("UPSTREAM_PASS", "swordfish")
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"github": {
+			RoutePrefix:         "/github",
+			BaseURL:             "https://upstream.internal",
+			CookieEncryptionKey: "env:COOKIE_SECRET",
+			Login: config.LoginConfig{
+				Path:          "/session",
+				UsernameField: "login",
+				PasswordField: "password",
+				Username:      "env:UPSTREAM_USER",
+				Password:      "env:UPSTREAM_PASS",
+			},
+		},
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "http://websudo.local/github/session", strings.NewReader(`{"login":"fake","password":"wrong","remember_me":true}`))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+	outReq, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.Nil(t, resp)
+	require.Equal(t, "https", outReq.URL.Scheme)
+	require.Equal(t, "upstream.internal", outReq.URL.Host)
+	require.Equal(t, "/session", outReq.URL.Path)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(outReq.Body).Decode(&body))
+	require.Equal(t, "boss", body["login"])
+	require.Equal(t, "swordfish", body["password"])
+	require.Equal(t, true, body["remember_me"])
+}
+
+func TestHandleRequestLoginJSONFieldsAreTopLevelKeysOnly(t *testing.T) {
+	t.Setenv("UPSTREAM_USER", "boss")
+	t.Setenv("UPSTREAM_PASS", "swordfish")
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"github": {
+			RoutePrefix:         "/github",
+			BaseURL:             "https://upstream.internal",
+			CookieEncryptionKey: "env:COOKIE_SECRET",
+			Login: config.LoginConfig{
+				Path:          "/session",
+				UsernameField: "user.login",
+				PasswordField: "user.password",
+				Username:      "env:UPSTREAM_USER",
+				Password:      "env:UPSTREAM_PASS",
+			},
+		},
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "http://websudo.local/github/session", strings.NewReader(`{"user":{"login":"fake","password":"wrong"}}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	outReq, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.Nil(t, resp)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(outReq.Body).Decode(&body))
+	require.Equal(t, "boss", body["user.login"])
+	require.Equal(t, "swordfish", body["user.password"])
+	require.Equal(t, map[string]any{"login": "fake", "password": "wrong"}, body["user"])
 }
 
 func TestHandleRequestDecryptsEncryptedCookiesAndLeavesInvalidOnes(t *testing.T) {

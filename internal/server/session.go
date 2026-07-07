@@ -5,8 +5,10 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -29,10 +31,6 @@ func isLoginRequest(req *http.Request, svc config.Service) bool {
 }
 
 func rewriteLoginRequest(req *http.Request, svc config.Service) error {
-	if !strings.HasPrefix(strings.ToLower(req.Header.Get("Content-Type")), "application/x-www-form-urlencoded") {
-		return fmt.Errorf("login request content-type %q is not supported", req.Header.Get("Content-Type"))
-	}
-
 	username, password, err := svc.Login.LoginCredentials()
 	if err != nil {
 		return err
@@ -43,6 +41,22 @@ func rewriteLoginRequest(req *http.Request, svc config.Service) error {
 	}
 	_ = req.Body.Close()
 
+	contentType, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	if err != nil {
+		contentType = strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Type")))
+	}
+
+	switch strings.ToLower(contentType) {
+	case "application/x-www-form-urlencoded":
+		return rewriteFormLoginRequest(req, svc, body, username, password)
+	case "application/json":
+		return rewriteJSONLoginRequest(req, svc, body, username, password)
+	default:
+		return fmt.Errorf("login request content-type %q is not supported", req.Header.Get("Content-Type"))
+	}
+}
+
+func rewriteFormLoginRequest(req *http.Request, svc config.Service, body []byte, username string, password string) error {
 	values, err := url.ParseQuery(string(body))
 	if err != nil {
 		return fmt.Errorf("parse login request body: %w", err)
@@ -50,12 +64,33 @@ func rewriteLoginRequest(req *http.Request, svc config.Service) error {
 	values.Set(svc.Login.UsernameField, username)
 	values.Set(svc.Login.PasswordField, password)
 	encoded := values.Encode()
-
-	req.Body = io.NopCloser(strings.NewReader(encoded))
-	req.ContentLength = int64(len(encoded))
-	req.Header.Set("Content-Length", strconv.Itoa(len(encoded)))
-	req.TransferEncoding = nil
+	setRequestBody(req, encoded)
 	return nil
+}
+
+func rewriteJSONLoginRequest(req *http.Request, svc config.Service, body []byte, username string, password string) error {
+	var values map[string]any
+	if err := json.Unmarshal(body, &values); err != nil {
+		return fmt.Errorf("parse login request JSON body: %w", err)
+	}
+	if values == nil {
+		return fmt.Errorf("parse login request JSON body: expected object")
+	}
+	values[svc.Login.UsernameField] = username
+	values[svc.Login.PasswordField] = password
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return fmt.Errorf("encode login request JSON body: %w", err)
+	}
+	setRequestBody(req, string(encoded))
+	return nil
+}
+
+func setRequestBody(req *http.Request, body string) {
+	req.Body = io.NopCloser(strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	req.TransferEncoding = nil
 }
 
 func decryptRequestCookies(req *http.Request, svc config.Service) error {

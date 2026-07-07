@@ -20,7 +20,7 @@ Current v1 scaffold includes:
 - method/path policy checks
 - placeholder credential validation
 - upstream credential injection from environment variables into headers
-- encrypted upstream session-cookie round-tripping for browser-style logins
+- encrypted upstream session-cookie round-tripping for browser-style form and JSON logins
 - per-placeholder-token variants for the same host or route
 - unit and e2e tests for credential validation, proxy routing, passthrough, and credential replacement
 
@@ -130,7 +130,8 @@ services:
 
 Behavior:
 - POST `/app/session` is intentionally exempt from placeholder-auth gating so the login flow can establish the upstream session, and the rest of the service can rely on the encrypted session cookies instead
-- `username` and `password` form fields are replaced with the configured upstream credentials
+- `username` and `password` form fields, or top-level JSON keys with those names, are replaced with the configured upstream credentials
+- JSON login bodies must be objects; nested JSON fields are not supported, so configured field names are treated as literal top-level keys
 - upstream `Set-Cookie` headers are encrypted before they reach the client
 - if `cookie_encryption_key` is omitted, websudo generates and persists a default key file next to the config (or at `cookie_encryption_key_path` if set)
 - later client `Cookie` headers are decrypted before forwarding upstream
@@ -147,7 +148,8 @@ Behavior:
 - unconfigured HTTP and HTTPS destinations are blocked when `block_unconfigured_destinations: true`
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
-- upstream login form fields can be replaced with configured credentials on a specific login endpoint
+- upstream login form fields or top-level JSON keys can be replaced with configured credentials on a specific login endpoint
+- nested JSON login fields are not supported
 - upstream Set-Cookie headers can be encrypted and client cookies decrypted on the way back in
 - undecryptable client cookies are intentionally forwarded as-is
 - login endpoints configured under `login.path` are intentionally allowed without placeholder-auth gating
