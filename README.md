@@ -44,24 +44,37 @@ Top-level options:
 
 Path values such as `tls.ca_cert_path`, `tls.ca_key_path`, and `cookie_encryption_key_path` support `~` and `~/...` expansion to the current user's home directory. Relative `cookie_encryption_key_path` values are resolved relative to the config file.
 
-Both modes use the same per-service fields:
+Each service must choose one authentication mode with `auth_mode`.
+
+`auth_mode: header` validates a client placeholder header on every request, then replaces it with the configured upstream header value. If the placeholder header is missing or does not match `require_placeholder_prefix`, the request is rejected before upstream auth is injected.
+
+Header injection fields:
 - `placeholder_auth` (`Authorization` is shorthand for `header:Authorization`)
 - `require_placeholder_prefix`
 - `inject_auth`
 - `inject_auth_target` (defaults to the same target as `placeholder_auth`)
+- `variants`
+
+`auth_mode: cookie` requires `login.path`, `login.placeholder_username`, and `login.placeholder_password`. The login request validates those placeholder form/JSON credentials, rewrites only that login body to the configured upstream username/password, and encrypts upstream session cookies before returning them to the client. Later requests rely only on those encrypted cookies being decrypted before forwarding upstream; no header auth is injected outside the login request.
+
+Cookie auth fields:
+- `login.path`, `login.username_field`, `login.password_field`, `login.placeholder_username`, `login.placeholder_password`, `login.username`, `login.password`
+- `cookie_encryption_key` (optional explicit secret or `env:...` override for login session-cookie encryption)
+- `cookie_encryption_key_path` (optional override for the persisted login cookie secret file; defaults to a generated file next to the config for login services)
+
+Cookie auth cannot be combined with header injection fields: `placeholder_auth`, `require_placeholder_prefix`, `inject_auth`, `inject_auth_target`, or `variants`.
+
+Policy fields supported by both modes:
 - `allowed_methods`
 - `allowed_paths`
 - `denied_paths`
-- `cookie_encryption_key` (optional explicit secret or `env:...` override for login session-cookie encryption)
-- `cookie_encryption_key_path` (optional override for the persisted login cookie secret file; defaults to a generated file next to the config for login services)
-- `login.path`, `login.username_field`, `login.password_field`, `login.placeholder_username`, `login.placeholder_password`, `login.username`, `login.password`
-- `variants`
 
 ## Example: forward proxy by hostname
 
 ```yaml
 services:
   github-forward:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -87,6 +100,7 @@ Behavior:
 ```yaml
 services:
   github-reverse:
+    auth_mode: header
     route_prefix: /github
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -114,6 +128,7 @@ Behavior:
 ```yaml
 services:
   app-browser:
+    auth_mode: cookie
     route_prefix: /app
     base_url: https://internal.example.com
     cookie_encryption_key_path: ./app-browser.cookie-key
@@ -132,7 +147,7 @@ services:
 
 Behavior:
 - POST `/app/session` is intentionally exempt from header placeholder-auth gating so the login flow can establish the upstream session, and the rest of the service can rely on the encrypted session cookies instead
-- `username` and `password` form fields, or top-level JSON keys with those names, must match `placeholder_username` and `placeholder_password` when those values are configured
+- `username` and `password` form fields, or top-level JSON keys with those names, must match `placeholder_username` and `placeholder_password`
 - after placeholder credential validation, those fields are replaced with the configured upstream `username` and `password`
 - JSON login bodies must be objects; nested JSON fields are not supported, so configured field names are treated as literal top-level keys
 - upstream `Set-Cookie` headers are encrypted before they reach the client

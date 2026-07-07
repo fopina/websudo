@@ -40,6 +40,7 @@ type LoginConfig struct {
 
 // Service describes one upstream service and its policy.
 type Service struct {
+	AuthMode                 string      `yaml:"auth_mode"`
 	BaseURL                  string      `yaml:"base_url"`
 	MatchHost                string      `yaml:"match_host"`
 	RoutePrefix              string      `yaml:"route_prefix"`
@@ -56,6 +57,11 @@ type Service struct {
 	Login                    LoginConfig `yaml:"login"`
 	Variants                 []Variant   `yaml:"variants"`
 }
+
+const (
+	AuthModeHeader = "header"
+	AuthModeCookie = "cookie"
+)
 
 // Variant is a placeholder-token-specific override for a service.
 type Variant struct {
@@ -123,12 +129,23 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 	if svc.MatchHost == "" && svc.RoutePrefix == "" {
 		return Service{}, fmt.Errorf("service %q must define either match_host or route_prefix", name)
 	}
-	if svc.PlaceholderAuth == "" && svc.Login.Path == "" {
-		return Service{}, fmt.Errorf("service %q is missing placeholder_auth", name)
+
+	svc.AuthMode = strings.ToLower(svc.AuthMode)
+	switch svc.AuthMode {
+	case AuthModeHeader:
+		if err := validateHeaderAuthMode(name, svc); err != nil {
+			return Service{}, err
+		}
+	case AuthModeCookie:
+		if err := validateCookieAuthMode(name, svc); err != nil {
+			return Service{}, err
+		}
+	case "":
+		return Service{}, fmt.Errorf("service %q is missing auth_mode", name)
+	default:
+		return Service{}, fmt.Errorf("service %q has unsupported auth_mode %q", name, svc.AuthMode)
 	}
-	if svc.InjectAuth == "" && svc.Login.Path == "" {
-		return Service{}, fmt.Errorf("service %q is missing inject_auth", name)
-	}
+
 	if svc.PlaceholderAuth != "" {
 		if _, err := parseHeaderAuthTarget(svc.PlaceholderAuth); err != nil {
 			return Service{}, fmt.Errorf("service %q placeholder_auth: %w", name, err)
@@ -214,8 +231,47 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 	return svc, nil
 }
 
+func validateHeaderAuthMode(name string, svc Service) error {
+	if hasLoginConfig(svc.Login) {
+		return fmt.Errorf("service %q auth_mode header cannot be combined with login fields", name)
+	}
+	if svc.CookieEncryptionKey != "" || svc.CookieEncryptionKeyPath != "" {
+		return fmt.Errorf("service %q auth_mode header cannot be combined with cookie_encryption_key or cookie_encryption_key_path", name)
+	}
+	if svc.PlaceholderAuth == "" {
+		return fmt.Errorf("service %q is missing placeholder_auth", name)
+	}
+	if svc.InjectAuth == "" {
+		return fmt.Errorf("service %q is missing inject_auth", name)
+	}
+	return nil
+}
+
+func validateCookieAuthMode(name string, svc Service) error {
+	if svc.PlaceholderAuth != "" || svc.InjectAuth != "" || svc.InjectAuthTarget != "" || svc.RequirePlaceholderPrefix != "" || len(svc.Variants) > 0 {
+		return fmt.Errorf("service %q auth_mode cookie cannot be combined with placeholder_auth, inject_auth, inject_auth_target, require_placeholder_prefix, or variants", name)
+	}
+	if svc.Login.Path == "" {
+		return fmt.Errorf("service %q auth_mode cookie requires login.path", name)
+	}
+	if svc.Login.PlaceholderUsername == "" && svc.Login.PlaceholderPassword == "" {
+		return fmt.Errorf("service %q auth_mode cookie requires login.placeholder_username and login.placeholder_password", name)
+	}
+	return nil
+}
+
+func hasLoginConfig(login LoginConfig) bool {
+	return login.Path != "" ||
+		login.UsernameField != "" ||
+		login.PasswordField != "" ||
+		login.PlaceholderUsername != "" ||
+		login.PlaceholderPassword != "" ||
+		login.Username != "" ||
+		login.Password != ""
+}
+
 func (s Service) needsCookieEncryption() bool {
-	return s.Login.Path != ""
+	return s.AuthMode == AuthModeCookie
 }
 
 // EffectiveService returns the base service merged with the matching variant, if any.

@@ -14,6 +14,7 @@ func TestLoad(t *testing.T) {
 
 	err := os.WriteFile(path, []byte(`services:
   github:
+    auth_mode: header
     match_host: api.github.com
     route_prefix: /github
     base_url: https://api.github.com
@@ -51,6 +52,7 @@ func TestLoadIgnoresCommentedTLSDefaults(t *testing.T) {
 #   require_existing_ca: true
 services:
   github:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -92,6 +94,7 @@ func TestEffectiveServiceVariantOverride(t *testing.T) {
 
 func TestNormalizeServiceDefaultsInjectAuthTargetToPlaceholderAuth(t *testing.T) {
 	svc, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "header:X-Placeholder-Auth",
@@ -103,6 +106,7 @@ func TestNormalizeServiceDefaultsInjectAuthTargetToPlaceholderAuth(t *testing.T)
 
 func TestNormalizeServiceRejectsCookieAuthTargets(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "github.com",
 		BaseURL:         "https://github.com",
 		PlaceholderAuth: "cookie:websudo_ph",
@@ -116,16 +120,19 @@ func TestNormalizeServiceExpandsHomeCookieEncryptionKeyPath(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	svc, err := normalizeService("browser", Service{
+		AuthMode:                AuthModeCookie,
 		RoutePrefix:             "/app",
 		BaseURL:                 "https://app.internal",
 		CookieEncryptionKey:     "static-secret",
 		CookieEncryptionKeyPath: "~/websudo/app.cookie-key",
 		Login: LoginConfig{
-			Path:          "/session",
-			UsernameField: "username",
-			PasswordField: "password",
-			Username:      "env:APP_USER",
-			Password:      "env:APP_PASS",
+			Path:                "/session",
+			UsernameField:       "username",
+			PasswordField:       "password",
+			PlaceholderUsername: "app",
+			PlaceholderPassword: "app",
+			Username:            "env:APP_USER",
+			Password:            "env:APP_PASS",
 		},
 	}, t.TempDir())
 

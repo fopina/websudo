@@ -6,6 +6,7 @@ tls:
 
 services:
   github-reverse:
+    auth_mode: header
     route_prefix: /github
     base_url: https://api.github.com
     placeholder_auth: Authorization

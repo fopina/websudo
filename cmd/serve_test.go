@@ -31,6 +31,7 @@ tls:
   require_existing_ca: false
 services:
   github:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -163,6 +164,7 @@ tls:
   require_existing_ca: true
 services:
   github:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization

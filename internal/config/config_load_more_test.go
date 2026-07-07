@@ -28,6 +28,7 @@ func TestLoadRejectsMissingServices(t *testing.T) {
 
 func TestNormalizeServiceRejectsMissingBaseURL(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		PlaceholderAuth: "Authorization",
 		InjectAuth:      "env:GITHUB_TOKEN",
@@ -38,6 +39,7 @@ func TestNormalizeServiceRejectsMissingBaseURL(t *testing.T) {
 
 func TestNormalizeServiceRejectsMissingPlaceholderAuth(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:   AuthModeHeader,
 		MatchHost:  "api.github.com",
 		BaseURL:    "https://api.github.com",
 		InjectAuth: "env:GITHUB_TOKEN",
@@ -48,6 +50,7 @@ func TestNormalizeServiceRejectsMissingPlaceholderAuth(t *testing.T) {
 
 func TestNormalizeServiceRejectsMissingInjectAuth(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "Authorization",
@@ -58,6 +61,7 @@ func TestNormalizeServiceRejectsMissingInjectAuth(t *testing.T) {
 
 func TestNormalizeServiceRejectsVariantWithoutName(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "Authorization",
@@ -72,6 +76,7 @@ func TestNormalizeServiceRejectsVariantWithoutName(t *testing.T) {
 
 func TestNormalizeServiceRejectsVariantWithoutPlaceholderMatch(t *testing.T) {
 	_, err := normalizeService("github", Service{
+		AuthMode:        AuthModeHeader,
 		MatchHost:       "api.github.com",
 		BaseURL:         "https://api.github.com",
 		PlaceholderAuth: "Authorization",
@@ -88,6 +93,7 @@ func TestLoadDefaultsBlockUnconfiguredDestinationsToFalse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "default-allow.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`services:
   github:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -104,6 +110,7 @@ func TestLoadAllowsEnablingBlockUnconfiguredDestinations(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(`block_unconfigured_destinations: true
 services:
   github:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization

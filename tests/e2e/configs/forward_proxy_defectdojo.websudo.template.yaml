@@ -6,6 +6,7 @@ tls:
 
 services:
   defectdojo:
+    auth_mode: cookie
     match_host: demo.defectdojo.org
     base_url: https://demo.defectdojo.org
     cookie_encryption_key: env:WEBSUDO_E2E_COOKIE_SECRET
@@ -19,5 +20,7 @@ services:
       path: /login
       username_field: username
       password_field: password
+      placeholder_username: definitely-not-the-real-user
+      placeholder_password: definitely-not-the-real-pass
       username: env:WEBSUDO_E2E_DEFECTDOJO_USERNAME
       password: env:WEBSUDO_E2E_DEFECTDOJO_PASSWORD

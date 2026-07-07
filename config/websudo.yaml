@@ -9,6 +9,7 @@
 
 services:
   github-forward:
+    auth_mode: header
     match_host: api.github.com
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -33,6 +34,7 @@ services:
           - /repos/*/*
 
   github-reverse:
+    auth_mode: header
     route_prefix: /github
     base_url: https://api.github.com
     placeholder_auth: Authorization
@@ -53,6 +55,7 @@ services:
           - /orgs/*
 
   dojo-browser:
+    auth_mode: cookie
     # defectdojo has HSTS so you need to add websudo CA as trusted CA to your browser/system to be able to connect to it via this setup
     match_host: pro.demo.defectdojo.com
     base_url: https://pro.demo.defectdojo.com
