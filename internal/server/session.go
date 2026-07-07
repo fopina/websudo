@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -19,6 +20,8 @@ import (
 )
 
 const encryptedCookiePrefix = "wsenc:"
+
+var errLoginPlaceholderCredentials = errors.New("login placeholder credentials do not match")
 
 type routeContext struct {
 	serviceName string
@@ -61,6 +64,9 @@ func rewriteFormLoginRequest(req *http.Request, svc config.Service, body []byte,
 	if err != nil {
 		return fmt.Errorf("parse login request body: %w", err)
 	}
+	if err := validateLoginPlaceholderCredentials(svc, values.Get(svc.Login.UsernameField), values.Get(svc.Login.PasswordField)); err != nil {
+		return err
+	}
 	values.Set(svc.Login.UsernameField, username)
 	values.Set(svc.Login.PasswordField, password)
 	encoded := values.Encode()
@@ -76,6 +82,11 @@ func rewriteJSONLoginRequest(req *http.Request, svc config.Service, body []byte,
 	if values == nil {
 		return fmt.Errorf("parse login request JSON body: expected object")
 	}
+	submittedUsername, _ := values[svc.Login.UsernameField].(string)
+	submittedPassword, _ := values[svc.Login.PasswordField].(string)
+	if err := validateLoginPlaceholderCredentials(svc, submittedUsername, submittedPassword); err != nil {
+		return err
+	}
 	values[svc.Login.UsernameField] = username
 	values[svc.Login.PasswordField] = password
 	encoded, err := json.Marshal(values)
@@ -83,6 +94,20 @@ func rewriteJSONLoginRequest(req *http.Request, svc config.Service, body []byte,
 		return fmt.Errorf("encode login request JSON body: %w", err)
 	}
 	setRequestBody(req, string(encoded))
+	return nil
+}
+
+func validateLoginPlaceholderCredentials(svc config.Service, submittedUsername string, submittedPassword string) error {
+	username, password, ok, err := svc.Login.PlaceholderCredentials()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	if submittedUsername != username || submittedPassword != password {
+		return errLoginPlaceholderCredentials
+	}
 	return nil
 }
 

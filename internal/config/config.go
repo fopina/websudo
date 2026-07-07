@@ -30,11 +30,13 @@ type TLSConfig struct {
 
 // LoginConfig defines a special upstream login request that should receive configured credentials.
 type LoginConfig struct {
-	Path          string `yaml:"path"`
-	UsernameField string `yaml:"username_field"`
-	PasswordField string `yaml:"password_field"`
-	Username      string `yaml:"username"`
-	Password      string `yaml:"password"`
+	Path                string `yaml:"path"`
+	UsernameField       string `yaml:"username_field"`
+	PasswordField       string `yaml:"password_field"`
+	PlaceholderUsername string `yaml:"placeholder_username"`
+	PlaceholderPassword string `yaml:"placeholder_password"`
+	Username            string `yaml:"username"`
+	Password            string `yaml:"password"`
 }
 
 // Service describes one upstream service and its policy.
@@ -177,13 +179,16 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 		if svc.Login.PasswordField == "" {
 			return Service{}, fmt.Errorf("service %q login is missing password_field", name)
 		}
+		if (svc.Login.PlaceholderUsername == "") != (svc.Login.PlaceholderPassword == "") {
+			return Service{}, fmt.Errorf("service %q login placeholder_username and placeholder_password must be configured together", name)
+		}
 		if svc.Login.Username == "" {
 			return Service{}, fmt.Errorf("service %q login is missing username", name)
 		}
 		if svc.Login.Password == "" {
 			return Service{}, fmt.Errorf("service %q login is missing password", name)
 		}
-	} else if svc.Login.UsernameField != "" || svc.Login.PasswordField != "" || svc.Login.Username != "" || svc.Login.Password != "" {
+	} else if svc.Login.UsernameField != "" || svc.Login.PasswordField != "" || svc.Login.PlaceholderUsername != "" || svc.Login.PlaceholderPassword != "" || svc.Login.Username != "" || svc.Login.Password != "" {
 		return Service{}, fmt.Errorf("service %q login fields require login.path", name)
 	}
 
@@ -262,6 +267,22 @@ func (l LoginConfig) LoginCredentials() (string, string, error) {
 		return "", "", fmt.Errorf("resolve login password: %w", err)
 	}
 	return username, password, nil
+}
+
+// PlaceholderCredentials resolves optional client-facing login credentials.
+func (l LoginConfig) PlaceholderCredentials() (string, string, bool, error) {
+	if l.PlaceholderUsername == "" && l.PlaceholderPassword == "" {
+		return "", "", false, nil
+	}
+	username, err := resolveValue(l.PlaceholderUsername)
+	if err != nil {
+		return "", "", false, fmt.Errorf("resolve login placeholder_username: %w", err)
+	}
+	password, err := resolveValue(l.PlaceholderPassword)
+	if err != nil {
+		return "", "", false, fmt.Errorf("resolve login placeholder_password: %w", err)
+	}
+	return username, password, true, nil
 }
 
 // CookieCipherKey resolves the cookie encryption secret into a stable AES-256 key.

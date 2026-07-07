@@ -54,26 +54,23 @@ services:
 
   dojo-browser:
     # defectdojo has HSTS so you need to add websudo CA as trusted CA to your browser/system to be able to connect to it via this setup
-    match_host: demo.defectdojo.org
-    base_url: https://demo.defectdojo.org
+    match_host: pro.demo.defectdojo.com
+    base_url: https://pro.demo.defectdojo.com
     # cookies issued by upstream are encrypted before they reach the client;
     # cookies that do not decrypt later are passed through unchanged.
     # optional override; otherwise websudo generates a persisted key file next
     # to the config automatically for login services.
-    # Client login POSTs must include: Authorization: Bearer app
-    placeholder_auth: Authorization
-    require_placeholder_prefix: "Bearer app"
     cookie_encryption_key_path: ./app-browser.cookie-key.test
     allowed_methods: [GET, POST]
     login:
       # login.path is intentionally allowed without placeholder-auth gating so
-      # the upstream session can be established first, unless placeholder_auth
-      # is configured as it is here.
+      # the upstream session can be established first.
       path: /login
       username_field: username
       password_field: password
-      # Client-submitted username/password values are currently not validated;
-      # websudo rewrites any submitted values in these fields before proxying.
+      # Client-submitted credentials must match before they are replaced.
+      placeholder_username: app
+      placeholder_password: app
       # THESE ARE NOT SECRETS - public demo credentials from:
       # https://github.com/DefectDojo/django-DefectDojo/#demo
       # use "env:" variables if setting up with real ones

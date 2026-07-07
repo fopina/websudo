@@ -52,6 +52,22 @@ func TestNormalizeServiceRequiresLoginPathWhenFieldsPresent(t *testing.T) {
 	require.ErrorContains(t, err, "login fields require login.path")
 }
 
+func TestNormalizeServiceRejectsPartialLoginPlaceholderCredentials(t *testing.T) {
+	_, err := normalizeService("github", Service{
+		MatchHost: "github.com",
+		BaseURL:   "https://github.com",
+		Login: LoginConfig{
+			Path:                "/session",
+			UsernameField:       "login",
+			PasswordField:       "password",
+			PlaceholderUsername: "app",
+			Username:            "env:UPSTREAM_USER",
+			Password:            "env:UPSTREAM_PASS",
+		},
+	}, t.TempDir())
+	require.ErrorContains(t, err, "placeholder_username and placeholder_password")
+}
+
 func TestNormalizeServiceAllowsLoginWithoutInjectedAuth(t *testing.T) {
 	svc, err := normalizeService("github", Service{
 		MatchHost: "github.com",

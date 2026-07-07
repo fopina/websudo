@@ -140,6 +140,17 @@ func TestLoginCredentialsResolveEnvSources(t *testing.T) {
 	require.Equal(t, "swordfish", password)
 }
 
+func TestPlaceholderCredentialsResolveEnvSources(t *testing.T) {
+	t.Setenv("PLACEHOLDER_USER", "app")
+	t.Setenv("PLACEHOLDER_PASS", "app-secret")
+
+	username, password, ok, err := (LoginConfig{PlaceholderUsername: "env:PLACEHOLDER_USER", PlaceholderPassword: "env:PLACEHOLDER_PASS"}).PlaceholderCredentials()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "app", username)
+	require.Equal(t, "app-secret", password)
+}
+
 func TestCookieCipherKeyUsesResolvedSecret(t *testing.T) {
 	t.Setenv("COOKIE_SECRET", "secret-key")
 	key, err := (Service{CookieEncryptionKey: "env:COOKIE_SECRET"}).CookieCipherKey()

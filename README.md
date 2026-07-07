@@ -45,7 +45,7 @@ Top-level options:
 Path values such as `tls.ca_cert_path`, `tls.ca_key_path`, and `cookie_encryption_key_path` support `~` and `~/...` expansion to the current user's home directory. Relative `cookie_encryption_key_path` values are resolved relative to the config file.
 
 Both modes use the same per-service fields:
-- `placeholder_auth` (`Authorization` is shorthand for `header:Authorization`; also gates `login.path` requests when configured on a login service)
+- `placeholder_auth` (`Authorization` is shorthand for `header:Authorization`)
 - `require_placeholder_prefix`
 - `inject_auth`
 - `inject_auth_target` (defaults to the same target as `placeholder_auth`)
@@ -54,7 +54,7 @@ Both modes use the same per-service fields:
 - `denied_paths`
 - `cookie_encryption_key` (optional explicit secret or `env:...` override for login session-cookie encryption)
 - `cookie_encryption_key_path` (optional override for the persisted login cookie secret file; defaults to a generated file next to the config for login services)
-- `login.path`, `login.username_field`, `login.password_field`, `login.username`, `login.password`
+- `login.path`, `login.username_field`, `login.password_field`, `login.placeholder_username`, `login.placeholder_password`, `login.username`, `login.password`
 - `variants`
 
 ## Example: forward proxy by hostname
@@ -116,8 +116,6 @@ services:
   app-browser:
     route_prefix: /app
     base_url: https://internal.example.com
-    placeholder_auth: Authorization
-    require_placeholder_prefix: "Bearer app"
     cookie_encryption_key_path: ./app-browser.cookie-key
     allowed_methods: [GET, POST]
     allowed_paths:
@@ -126,15 +124,16 @@ services:
       path: /session
       username_field: username
       password_field: password
+      placeholder_username: app
+      placeholder_password: app
       username: env:APP_LOGIN_USER
       password: env:APP_LOGIN_PASS
 ```
 
 Behavior:
-- POST `/app/session` requires `Authorization: Bearer app`; when `placeholder_auth` is omitted from a login service, the login endpoint is intentionally allowed without placeholder-auth gating so the upstream session can be established first
-- valid placeholder credentials on login requests are validated and stripped before forwarding upstream
-- `username` and `password` form fields, or top-level JSON keys with those names, are replaced with the configured upstream credentials
-- client-submitted username/password values are not validated by the login rewrite itself; use `placeholder_auth` when the credential exchange should require a client token
+- POST `/app/session` is intentionally exempt from header placeholder-auth gating so the login flow can establish the upstream session, and the rest of the service can rely on the encrypted session cookies instead
+- `username` and `password` form fields, or top-level JSON keys with those names, must match `placeholder_username` and `placeholder_password` when those values are configured
+- after placeholder credential validation, those fields are replaced with the configured upstream `username` and `password`
 - JSON login bodies must be objects; nested JSON fields are not supported, so configured field names are treated as literal top-level keys
 - upstream `Set-Cookie` headers are encrypted before they reach the client
 - if `cookie_encryption_key` is omitted, websudo generates and persists a default key file next to the config (or at `cookie_encryption_key_path` if set)
@@ -152,12 +151,11 @@ Behavior:
 - unconfigured HTTP and HTTPS destinations are blocked when `block_unconfigured_destinations: true`
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
-- upstream login form fields or top-level JSON keys can be replaced with configured credentials on a specific login endpoint
-- login endpoints can require placeholder credentials when `placeholder_auth` is configured
+- upstream login form fields or top-level JSON keys can be validated against configured placeholder credentials and replaced with configured upstream credentials on a specific login endpoint
 - nested JSON login fields are not supported
 - upstream Set-Cookie headers can be encrypted and client cookies decrypted on the way back in
 - undecryptable client cookies are intentionally forwarded as-is
-- login endpoints configured under `login.path` are intentionally allowed without placeholder-auth gating unless `placeholder_auth` is configured
+- login endpoints configured under `login.path` are intentionally allowed without header placeholder-auth gating
 
 ## Next steps
 
