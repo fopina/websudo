@@ -89,6 +89,8 @@ services:
     cookie_encryption_key_path: ./dojo-api.token-key.test
     allowed_methods: [GET, POST]
     login:
+      # Client login requests should be application/x-www-form-urlencoded with
+      # username and password fields; upstream returns JSON with a "token" key.
       path: /api/v2/api-token-auth/
       username_field: username
       password_field: password
