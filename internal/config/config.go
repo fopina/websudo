@@ -24,8 +24,7 @@ type Config struct {
 type TLSConfig struct {
 	CAcertPath        string `yaml:"ca_cert_path"`
 	CAkeyPath         string `yaml:"ca_key_path"`
-	GenerateOnBoot    bool   `yaml:"generate_on_boot"`
-	GenerateOnBootSet bool   `yaml:"-"`
+	RequireExistingCA bool   `yaml:"require_existing_ca"`
 }
 
 // LoginConfig defines a special upstream login request that should receive configured credentials.
@@ -81,7 +80,6 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("decode config %q: %w", path, err)
 	}
-	cfg.TLS.GenerateOnBootSet = strings.Contains(string(data), "generate_on_boot:")
 
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
@@ -114,9 +112,6 @@ func normalizeTLSConfig(tls TLSConfig) TLSConfig {
 		tls.CAkeyPath = filepath.Join(baseDir, "ca-key.pem")
 	} else {
 		tls.CAkeyPath = expandHomePath(tls.CAkeyPath)
-	}
-	if !tls.GenerateOnBootSet {
-		tls.GenerateOnBoot = true
 	}
 	return tls
 }

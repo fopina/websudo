@@ -39,7 +39,7 @@ Each service can define one or both of:
 
 Top-level options:
 - `block_unconfigured_destinations`: defaults to `false`; when `true`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
-- `tls.generate_on_boot`: defaults to `true`; when CA files are missing, generate a local CA certificate and key for TLS interception
+- `tls.require_existing_ca`: defaults to `false`; when `true`, startup fails if CA files are missing instead of generating a local CA certificate and key for TLS interception
 - `tls.ca_cert_path` and `tls.ca_key_path`: optional CA certificate/key paths; default to `~/.local/share/websudo/ca.pem` and `~/.local/share/websudo/ca-key.pem`
 
 Path values such as `tls.ca_cert_path`, `tls.ca_key_path`, and `cookie_encryption_key_path` support `~` and `~/...` expansion to the current user's home directory. Relative `cookie_encryption_key_path` values are resolved relative to the config file.

@@ -20,7 +20,7 @@ func EnsureTLSAssets(_ context.Context, cfg *Config) error {
 	if certExists && keyExists {
 		return nil
 	}
-	if !cfg.TLS.GenerateOnBoot {
+	if cfg.TLS.RequireExistingCA {
 		return fmt.Errorf("CA files are missing: cert=%s key=%s", cfg.TLS.CAcertPath, cfg.TLS.CAkeyPath)
 	}
 

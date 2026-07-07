@@ -28,7 +28,7 @@ func writeTestConfig(t *testing.T) string {
 
 	err := os.WriteFile(configPath, []byte(`listen: 127.0.0.1:0
 tls:
-  generate_on_boot: true
+  require_existing_ca: false
 services:
   github:
     match_host: api.github.com
@@ -151,7 +151,7 @@ func TestServeCommandPropagatesServerError(t *testing.T) {
 	require.ErrorContains(t, err, "boom")
 }
 
-func TestServeCommandFailsWhenTLSAssetsMissingAndAutogenDisabled(t *testing.T) {
+func TestServeCommandFailsWhenExistingCARequiredAndTLSAssetsMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "websudo.yaml")
 	missingDir := filepath.Join(tmpDir, "missing")
@@ -160,7 +160,7 @@ func TestServeCommandFailsWhenTLSAssetsMissingAndAutogenDisabled(t *testing.T) {
 
 	err := os.WriteFile(configPath, []byte(`listen: 127.0.0.1:0
 tls:
-  generate_on_boot: false
+  require_existing_ca: true
 services:
   github:
     match_host: api.github.com

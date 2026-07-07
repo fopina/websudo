@@ -15,6 +15,7 @@ func TestNormalizeTLSConfigDefaults(t *testing.T) {
 	tlsCfg := normalizeTLSConfig(TLSConfig{})
 	require.Contains(t, tlsCfg.CAcertPath, filepath.Join(".local", "share", "websudo", "ca.pem"))
 	require.Contains(t, tlsCfg.CAkeyPath, filepath.Join(".local", "share", "websudo", "ca-key.pem"))
+	require.False(t, tlsCfg.RequireExistingCA)
 }
 
 func TestNormalizeTLSConfigExpandsHomePaths(t *testing.T) {
@@ -38,12 +39,11 @@ func TestEnsureTLSAssetsUsesDefaultPathsWhenMissing(t *testing.T) {
 	require.FileExists(t, cfg.TLS.CAkeyPath)
 }
 
-func TestEnsureTLSAssetsGeneratesCAOnBoot(t *testing.T) {
+func TestEnsureTLSAssetsGeneratesCAByDefault(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &Config{TLS: TLSConfig{
-		GenerateOnBoot: true,
-		CAcertPath:     filepath.Join(tmpDir, "ca.pem"),
-		CAkeyPath:      filepath.Join(tmpDir, "ca-key.pem"),
+		CAcertPath: filepath.Join(tmpDir, "ca.pem"),
+		CAkeyPath:  filepath.Join(tmpDir, "ca-key.pem"),
 	}}
 
 	require.NoError(t, EnsureTLSAssets(context.Background(), cfg))
@@ -51,12 +51,12 @@ func TestEnsureTLSAssetsGeneratesCAOnBoot(t *testing.T) {
 	require.FileExists(t, cfg.TLS.CAkeyPath)
 }
 
-func TestEnsureTLSAssetsErrorsWhenFilesMissingAndAutogenDisabled(t *testing.T) {
+func TestEnsureTLSAssetsErrorsWhenExistingCARequired(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &Config{TLS: TLSConfig{
-		GenerateOnBoot: false,
-		CAcertPath:     filepath.Join(tmpDir, "ca.pem"),
-		CAkeyPath:      filepath.Join(tmpDir, "ca-key.pem"),
+		RequireExistingCA: true,
+		CAcertPath:        filepath.Join(tmpDir, "ca.pem"),
+		CAkeyPath:         filepath.Join(tmpDir, "ca-key.pem"),
 	}}
 
 	err := EnsureTLSAssets(context.Background(), cfg)

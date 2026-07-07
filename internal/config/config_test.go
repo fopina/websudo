@@ -43,6 +43,26 @@ func TestLoad(t *testing.T) {
 	require.Len(t, cfg.Services["github"].Variants, 1)
 }
 
+func TestLoadIgnoresCommentedTLSDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "websudo.yaml")
+
+	err := os.WriteFile(path, []byte(`# tls:
+#   require_existing_ca: true
+services:
+  github:
+    match_host: api.github.com
+    base_url: https://api.github.com
+    placeholder_auth: Authorization
+    inject_auth: env:GITHUB_TOKEN
+`), 0o600)
+	require.NoError(t, err)
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.False(t, cfg.TLS.RequireExistingCA)
+}
+
 func TestInjectedAuthValue(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "Bearer live_token")
 

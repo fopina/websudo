@@ -3,7 +3,7 @@
 # block_unconfigured_destinations: false
 
 # tls:
-#   generate_on_boot: true
+#   require_existing_ca: false
 #   ca_cert_path: ~/.local/share/websudo/ca.pem
 #   ca_key_path: ~/.local/share/websudo/ca-key.pem
 
