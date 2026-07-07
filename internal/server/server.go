@@ -188,6 +188,9 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 	if err := decryptRequestCookies(req, matched.service); err != nil {
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
 	}
+	if err := decryptRequestAuthToken(req, matched.service); err != nil {
+		return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
+	}
 
 	targetURL, err := url.Parse(matched.service.BaseURL)
 	if err != nil {
@@ -232,7 +235,7 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, validationErrorMessage(err, matched))
 		}
 
-		if matched.service.InjectAuth != "" {
+		if matched.service.InjectAuth != "" && matched.service.Login.Path == "" {
 			upstreamAuth, err := matched.service.InjectedAuthValue()
 			if err != nil {
 				return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, err.Error())
@@ -252,7 +255,7 @@ func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.
 	req.URL.Path = joinURLPath(targetURL.Path, req.URL.Path)
 	req.RequestURI = ""
 
-	ctx.UserData = routeContext{serviceName: matched.serviceName, variantName: matched.variantName, service: matched.service}
+	ctx.UserData = routeContext{serviceName: matched.serviceName, variantName: matched.variantName, service: matched.service, isLogin: isLogin}
 	s.log().Info("request allowed", "service", matched.serviceName, "variant", matched.variantName, "method", req.Method, "path", req.URL.Path, "login", isLogin)
 	return req, nil
 }
@@ -266,6 +269,12 @@ func (s *Server) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *htt
 			if err := encryptResponseCookies(resp, route.service); err != nil {
 				s.log().Warn("response cookie encryption failed", "service", route.serviceName, "variant", route.variantName, "error", err)
 				return responseError(resp, resp.Request, http.StatusInternalServerError, err.Error())
+			}
+			if route.isLogin {
+				if err := encryptLoginResponseAuthToken(resp, route.service); err != nil {
+					s.log().Warn("response token encryption failed", "service", route.serviceName, "variant", route.variantName, "error", err)
+					return responseError(resp, resp.Request, http.StatusInternalServerError, err.Error())
+				}
 			}
 			s.log().Info("response proxied", "service", route.serviceName, "variant", route.variantName)
 		}

@@ -21,6 +21,7 @@ Current v1 scaffold includes:
 - placeholder credential validation
 - upstream credential injection from environment variables into headers
 - encrypted upstream session-cookie round-tripping for browser-style form and JSON logins
+- encrypted upstream login-token round-tripping for API logins
 - per-placeholder-token variants for the same host or route
 - unit and e2e tests for credential validation, proxy routing, passthrough, and credential replacement
 
@@ -48,12 +49,22 @@ Each service must choose one authentication mode with `auth_mode`.
 
 `auth_mode: header` validates a client placeholder header on every request, then replaces it with the configured upstream header value. If the placeholder header is missing or does not match `require_placeholder_prefix`, the request is rejected before upstream auth is injected.
 
+When `auth_mode: header` includes `login.path`, it uses the same login request rewrite as cookie auth but captures a token from the JSON login response instead of requiring `inject_auth`. The response token is encrypted before returning to the client, and later encrypted client auth headers are decrypted before forwarding upstream.
+
 Header injection fields:
 - `placeholder_auth` (`Authorization` is shorthand for `header:Authorization`)
 - `require_placeholder_prefix`
-- `inject_auth`
+- `inject_auth` (required unless `login.path` is configured)
 - `inject_auth_target` (defaults to the same target as `placeholder_auth`)
 - `variants`
+
+Header login-token fields:
+- `login.path`, `login.username_field`, `login.password_field`, `login.placeholder_username`, `login.placeholder_password`, `login.username`, `login.password`
+- `login.token_field` (optional; defaults to `token`)
+- `cookie_encryption_key` (optional explicit secret or `env:...` override for login-token encryption)
+- `cookie_encryption_key_path` (optional override for the persisted login-token secret file; defaults to a generated file next to the config for login services)
+
+Header login-token services cannot be combined with `inject_auth` or `variants`; the upstream token comes from the login response instead of from a configured static credential or placeholder-token selector.
 
 `auth_mode: cookie` requires `login.path`, `login.placeholder_username`, and `login.placeholder_password`. The login request validates those placeholder form/JSON credentials, rewrites only that login body to the configured upstream username/password, and encrypts upstream session cookies before returning them to the client. Later requests rely only on those encrypted cookies being decrypted before forwarding upstream; no header auth is injected outside the login request.
 
@@ -155,6 +166,36 @@ Behavior:
 - later client `Cookie` headers are decrypted before forwarding upstream
 - if a client cookie cannot be decrypted, it is forwarded as-is
 
+## Example: upstream login capture for API tokens
+
+```yaml
+services:
+  app-api:
+    auth_mode: header
+    route_prefix: /api
+    base_url: https://internal.example.com
+    placeholder_auth: Authorization
+    cookie_encryption_key_path: ./app-api.token-key
+    allowed_methods: [GET, POST]
+    allowed_paths:
+      - /profile
+    login:
+      path: /session
+      username_field: username
+      password_field: password
+      token_field: access_token
+      placeholder_username: app
+      placeholder_password: app
+      username: env:APP_LOGIN_USER
+      password: env:APP_LOGIN_PASS
+```
+
+Behavior:
+- POST `/api/session` validates the placeholder username/password and rewrites them to the configured upstream credentials
+- the upstream JSON response field named by `login.token_field` is encrypted before returning to the client
+- later requests can send the encrypted value in `Authorization`, for example `Authorization: Bearer wsenc:...`
+- websudo decrypts that header before forwarding upstream, preserving the header prefix
+
 ## Validation covered by tests
 
 - requests without placeholder credentials are rejected
@@ -170,6 +211,7 @@ Behavior:
 - nested JSON login fields are not supported
 - upstream Set-Cookie headers can be encrypted and client cookies decrypted on the way back in
 - undecryptable client cookies are intentionally forwarded as-is
+- upstream login response tokens can be encrypted and client auth headers decrypted on the way back in
 - login endpoints configured under `login.path` are intentionally allowed without header placeholder-auth gating
 
 ## Next steps

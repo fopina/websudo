@@ -32,6 +32,7 @@ type LoginConfig struct {
 	Path                string `yaml:"path"`
 	UsernameField       string `yaml:"username_field"`
 	PasswordField       string `yaml:"password_field"`
+	TokenField          string `yaml:"token_field"`
 	PlaceholderUsername string `yaml:"placeholder_username"`
 	PlaceholderPassword string `yaml:"placeholder_password"`
 	Username            string `yaml:"username"`
@@ -185,6 +186,9 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 		if !strings.HasPrefix(svc.Login.Path, "/") {
 			svc.Login.Path = "/" + svc.Login.Path
 		}
+		if svc.AuthMode == AuthModeHeader && svc.Login.TokenField == "" {
+			svc.Login.TokenField = "token"
+		}
 		if svc.Login.UsernameField == "" {
 			return Service{}, fmt.Errorf("service %q login is missing username_field", name)
 		}
@@ -200,7 +204,7 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 		if svc.Login.Password == "" {
 			return Service{}, fmt.Errorf("service %q login is missing password", name)
 		}
-	} else if svc.Login.UsernameField != "" || svc.Login.PasswordField != "" || svc.Login.PlaceholderUsername != "" || svc.Login.PlaceholderPassword != "" || svc.Login.Username != "" || svc.Login.Password != "" {
+	} else if svc.Login.UsernameField != "" || svc.Login.PasswordField != "" || svc.Login.TokenField != "" || svc.Login.PlaceholderUsername != "" || svc.Login.PlaceholderPassword != "" || svc.Login.Username != "" || svc.Login.Password != "" {
 		return Service{}, fmt.Errorf("service %q login fields require login.path", name)
 	}
 
@@ -232,17 +236,24 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 }
 
 func validateHeaderAuthMode(name string, svc Service) error {
-	if hasLoginConfig(svc.Login) {
-		return fmt.Errorf("service %q auth_mode header cannot be combined with login fields", name)
-	}
-	if svc.CookieEncryptionKey != "" || svc.CookieEncryptionKeyPath != "" {
+	hasLogin := hasLoginConfig(svc.Login)
+	if !hasLogin && (svc.CookieEncryptionKey != "" || svc.CookieEncryptionKeyPath != "") {
 		return fmt.Errorf("service %q auth_mode header cannot be combined with cookie_encryption_key or cookie_encryption_key_path", name)
 	}
 	if svc.PlaceholderAuth == "" {
 		return fmt.Errorf("service %q is missing placeholder_auth", name)
 	}
-	if svc.InjectAuth == "" {
+	if svc.InjectAuth == "" && !hasLogin {
 		return fmt.Errorf("service %q is missing inject_auth", name)
+	}
+	if hasLogin && svc.InjectAuth != "" {
+		return fmt.Errorf("service %q auth_mode header with login cannot be combined with inject_auth", name)
+	}
+	if hasLogin && len(svc.Variants) > 0 {
+		return fmt.Errorf("service %q auth_mode header with login cannot be combined with variants", name)
+	}
+	if hasLogin && (svc.Login.PlaceholderUsername == "" || svc.Login.PlaceholderPassword == "") {
+		return fmt.Errorf("service %q auth_mode header with login requires login.placeholder_username and login.placeholder_password", name)
 	}
 	return nil
 }
@@ -264,6 +275,7 @@ func hasLoginConfig(login LoginConfig) bool {
 	return login.Path != "" ||
 		login.UsernameField != "" ||
 		login.PasswordField != "" ||
+		login.TokenField != "" ||
 		login.PlaceholderUsername != "" ||
 		login.PlaceholderPassword != "" ||
 		login.Username != "" ||
@@ -271,7 +283,7 @@ func hasLoginConfig(login LoginConfig) bool {
 }
 
 func (s Service) needsCookieEncryption() bool {
-	return s.AuthMode == AuthModeCookie
+	return s.AuthMode == AuthModeCookie || (s.AuthMode == AuthModeHeader && s.Login.Path != "")
 }
 
 // EffectiveService returns the base service merged with the matching variant, if any.

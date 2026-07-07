@@ -231,3 +231,68 @@ func TestHandleResponseEncryptsUpstreamSetCookie(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "live_session", decrypted)
 }
+
+func TestHeaderLoginEncryptsResponseTokenAndDecryptsRequestToken(t *testing.T) {
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	svc := config.Service{
+		AuthMode:            config.AuthModeHeader,
+		RoutePrefix:         "/api",
+		BaseURL:             "https://upstream.internal",
+		PlaceholderAuth:     "Authorization",
+		CookieEncryptionKey: "env:COOKIE_SECRET",
+		AllowedMethods:      []string{http.MethodGet},
+		AllowedPaths:        []string{"/profile"},
+		Login: config.LoginConfig{
+			Path:                "/session",
+			UsernameField:       "login",
+			PasswordField:       "password",
+			TokenField:          "access_token",
+			PlaceholderUsername: "app",
+			PlaceholderPassword: "app",
+			Username:            "boss",
+			Password:            "swordfish",
+		},
+	}
+	srv := New(&config.Config{Services: map[string]config.Service{"app": svc}})
+
+	loginReq := httptest.NewRequest(http.MethodPost, "http://websudo.local/api/session", strings.NewReader("login=app&password=app"))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := &goproxy.ProxyCtx{}
+	outReq, resp := srv.handleRequest(loginReq, ctx)
+	require.Nil(t, resp)
+	require.Equal(t, "/session", outReq.URL.Path)
+	require.Empty(t, outReq.Header.Get("Authorization"))
+	body, err := io.ReadAll(outReq.Body)
+	require.NoError(t, err)
+	require.Equal(t, "login=boss&password=swordfish", string(body))
+
+	upstreamResp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body:    io.NopCloser(strings.NewReader(`{"access_token":"live_token","token_type":"Bearer"}`)),
+		Request: outReq,
+	}
+	loginResp := srv.handleResponse(upstreamResp, ctx)
+	require.NotNil(t, loginResp)
+
+	var loginPayload map[string]string
+	require.NoError(t, json.NewDecoder(loginResp.Body).Decode(&loginPayload))
+	encryptedToken := loginPayload["access_token"]
+	require.NotEmpty(t, encryptedToken)
+	require.NotEqual(t, "live_token", encryptedToken)
+	key, err := svc.CookieCipherKey()
+	require.NoError(t, err)
+	decrypted, ok := decryptCookieValue(key, "Authorization", encryptedToken)
+	require.True(t, ok)
+	require.Equal(t, "live_token", decrypted)
+
+	apiReq := httptest.NewRequest(http.MethodGet, "http://websudo.local/api/profile", nil)
+	apiReq.Header.Set("Authorization", "Bearer "+encryptedToken)
+	outReq, resp = srv.handleRequest(apiReq, &goproxy.ProxyCtx{})
+	require.Nil(t, resp)
+	require.Equal(t, "/profile", outReq.URL.Path)
+	require.Equal(t, "Bearer live_token", outReq.Header.Get("Authorization"))
+}
