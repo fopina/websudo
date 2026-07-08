@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -31,6 +33,8 @@ type matchedRoute struct {
 	path        string
 	requestPath string
 }
+
+const builtinCACertPath = "/.well-known/websudo/ca.pem"
 
 var errNoConfiguredService = errors.New("no configured service matches request")
 
@@ -155,6 +159,10 @@ func serviceModes(svc config.Service) []string {
 }
 
 func (s *Server) handleNonProxyRequest(w http.ResponseWriter, req *http.Request) {
+	if s.handleBuiltinRequest(w, req) {
+		return
+	}
+
 	ctx := &goproxy.ProxyCtx{}
 	outReq, resp := s.handleRequest(req, ctx)
 	if resp == nil {
@@ -170,6 +178,10 @@ func (s *Server) handleNonProxyRequest(w http.ResponseWriter, req *http.Request)
 }
 
 func (s *Server) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+	if resp := s.builtinResponse(req); resp != nil {
+		return req, resp
+	}
+
 	matched, err := s.matchRoute(req)
 	if err != nil {
 		if errors.Is(err, errNoConfiguredService) && req.URL.Hostname() != "" {
@@ -280,6 +292,57 @@ func (s *Server) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *htt
 		}
 	}
 	return resp
+}
+
+func (s *Server) handleBuiltinRequest(w http.ResponseWriter, req *http.Request) bool {
+	resp := s.builtinResponse(req)
+	if resp == nil {
+		return false
+	}
+	writeResponse(w, resp)
+	return true
+}
+
+func (s *Server) builtinResponse(req *http.Request) *http.Response {
+	if req.URL.Path != builtinCACertPath {
+		return nil
+	}
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		resp := goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusMethodNotAllowed, "method not allowed")
+		resp.Header.Set("Allow", strings.Join([]string{http.MethodGet, http.MethodHead}, ", "))
+		return resp
+	}
+	if s.cfg.TLS.CAcertPath == "" {
+		return goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusNotFound, "CA certificate is not configured")
+	}
+
+	certPEM, err := os.ReadFile(s.cfg.TLS.CAcertPath)
+	if err != nil {
+		return goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusInternalServerError, fmt.Sprintf("read CA cert: %v", err))
+	}
+
+	body := io.NopCloser(bytes.NewReader(certPEM))
+	if req.Method == http.MethodHead {
+		body = http.NoBody
+	}
+
+	return &http.Response{
+		StatusCode:    http.StatusOK,
+		Status:        fmt.Sprintf("%d %s", http.StatusOK, http.StatusText(http.StatusOK)),
+		Header:        caCertDownloadHeaders(len(certPEM)),
+		Body:          body,
+		ContentLength: int64(len(certPEM)),
+		Request:       req,
+	}
+}
+
+func caCertDownloadHeaders(contentLength int) http.Header {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/x-pem-file")
+	header.Set("Content-Disposition", `attachment; filename="websudo-ca.pem"`)
+	header.Set("Content-Length", fmt.Sprintf("%d", contentLength))
+	header.Set("Cache-Control", "no-store")
+	return header
 }
 
 func writeResponse(w http.ResponseWriter, resp *http.Response) {

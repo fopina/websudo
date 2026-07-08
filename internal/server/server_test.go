@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/elazarl/goproxy"
@@ -247,6 +248,77 @@ func TestNonProxyHandlerRejectsUnconfiguredPathBeforeAllowedPathValidation(t *te
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	require.Contains(t, rec.Body.String(), "no configured service matches request")
 	require.NotContains(t, rec.Body.String(), "is not allowed")
+}
+
+func TestNonProxyHandlerServesCACertificateBuiltinRoute(t *testing.T) {
+	certPath, keyPath := generatedCATestPaths(t)
+	srv := New(&config.Config{
+		BlockUnconfiguredDestinations: true,
+		TLS: config.TLSConfig{
+			CAcertPath: certPath,
+			CAkeyPath:  keyPath,
+		},
+		Services: map[string]config.Service{},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, builtinCACertPath, nil)
+	rec := httptest.NewRecorder()
+
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "application/x-pem-file", rec.Header().Get("Content-Type"))
+	require.Equal(t, `attachment; filename="websudo-ca.pem"`, rec.Header().Get("Content-Disposition"))
+	require.Contains(t, rec.Body.String(), "BEGIN CERTIFICATE")
+	require.NotContains(t, rec.Body.String(), "PRIVATE KEY")
+}
+
+func TestBuiltinCACertificateRouteRejectsUnsupportedMethods(t *testing.T) {
+	certPath, keyPath := generatedCATestPaths(t)
+	srv := New(&config.Config{
+		TLS: config.TLSConfig{
+			CAcertPath: certPath,
+			CAkeyPath:  keyPath,
+		},
+		Services: map[string]config.Service{},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, builtinCACertPath, nil)
+	rec := httptest.NewRecorder()
+
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	require.Equal(t, "GET, HEAD", rec.Header().Get("Allow"))
+}
+
+func TestHandleRequestServesCACertificateBuiltinRouteBeforeProxyMatching(t *testing.T) {
+	certPath, keyPath := generatedCATestPaths(t)
+	srv := New(&config.Config{
+		BlockUnconfiguredDestinations: true,
+		TLS: config.TLSConfig{
+			CAcertPath: certPath,
+			CAkeyPath:  keyPath,
+		},
+		Services: map[string]config.Service{},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://websudo.local"+builtinCACertPath, nil)
+	_, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.NotNil(t, resp)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "BEGIN CERTIFICATE")
+}
+
+func generatedCATestPaths(t *testing.T) (string, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	certPath := filepath.Join(tmpDir, "ca.pem")
+	keyPath := filepath.Join(tmpDir, "ca-key.pem")
+	require.NoError(t, config.GenerateCA(certPath, keyPath))
+	return certPath, keyPath
 }
 
 func TestHandleRequestReverseProxyVariantUsesDifferentAllowedPathAndCredential(t *testing.T) {
