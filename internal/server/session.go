@@ -18,6 +18,8 @@ import (
 
 	"github.com/elazarl/goproxy"
 	"github.com/fopina/websudo/internal/config"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const encryptedCookiePrefix = "wsenc:"
@@ -224,27 +226,26 @@ func encryptLoginResponseAuthToken(resp *http.Response, svc config.Service) erro
 		return fmt.Errorf("login token response content-type %q is not supported", resp.Header.Get("Content-Type"))
 	}
 
-	var values map[string]any
-	if err := json.Unmarshal(body, &values); err != nil {
+	var parsed json.RawMessage
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		return fmt.Errorf("parse login token response JSON body: %w", err)
 	}
-	if values == nil {
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
 		return fmt.Errorf("parse login token response JSON body: expected object")
 	}
-	rawToken, ok := values[svc.Login.TokenField]
-	if !ok {
+	rawToken := gjson.GetBytes(body, svc.Login.TokenField)
+	if !rawToken.Exists() {
 		return fmt.Errorf("login token response is missing token field %q", svc.Login.TokenField)
 	}
-	token, ok := rawToken.(string)
-	if !ok || token == "" {
+	if rawToken.Type != gjson.String || rawToken.String() == "" {
 		return fmt.Errorf("login token response token field %q must be a non-empty string", svc.Login.TokenField)
 	}
-	encrypted, err := encryptCookieValue(key, header, token)
+	encrypted, err := encryptCookieValue(key, header, rawToken.String())
 	if err != nil {
 		return err
 	}
-	values[svc.Login.TokenField] = encrypted
-	encoded, err := json.Marshal(values)
+	encoded, err := sjson.SetBytes(body, svc.Login.TokenField, encrypted)
 	if err != nil {
 		return fmt.Errorf("encode login token response JSON body: %w", err)
 	}
