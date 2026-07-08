@@ -107,6 +107,36 @@ func TestHandleRequestLoginWithPlaceholderCredentialsRewrites(t *testing.T) {
 	require.Equal(t, "login=boss&password=swordfish", string(body))
 }
 
+func TestHandleRequestLoginFormFieldsKeepLiteralDots(t *testing.T) {
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"github": {
+			RoutePrefix:         "/github",
+			BaseURL:             "https://upstream.internal",
+			CookieEncryptionKey: "env:COOKIE_SECRET",
+			Login: config.LoginConfig{
+				Path:                "/session",
+				UsernameField:       "user.login",
+				PasswordField:       "user.password",
+				PlaceholderUsername: "app",
+				PlaceholderPassword: "app",
+				Username:            "boss",
+				Password:            "swordfish",
+			},
+		},
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "http://websudo.local/github/session", strings.NewReader("user.login=app&user.password=app"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	outReq, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.Nil(t, resp)
+	body, err := io.ReadAll(outReq.Body)
+	require.NoError(t, err)
+	require.Equal(t, "user.login=boss&user.password=swordfish", string(body))
+}
+
 func TestHandleRequestLoginReplacesConfiguredJSONCredentials(t *testing.T) {
 	t.Setenv("UPSTREAM_USER", "boss")
 	t.Setenv("UPSTREAM_PASS", "swordfish")
@@ -143,7 +173,7 @@ func TestHandleRequestLoginReplacesConfiguredJSONCredentials(t *testing.T) {
 	require.Equal(t, true, body["remember_me"])
 }
 
-func TestHandleRequestLoginJSONFieldsAreTopLevelKeysOnly(t *testing.T) {
+func TestHandleRequestLoginJSONFieldsSupportNestedPaths(t *testing.T) {
 	t.Setenv("UPSTREAM_USER", "boss")
 	t.Setenv("UPSTREAM_PASS", "swordfish")
 	t.Setenv("COOKIE_SECRET", "secret-key")
@@ -154,16 +184,51 @@ func TestHandleRequestLoginJSONFieldsAreTopLevelKeysOnly(t *testing.T) {
 			BaseURL:             "https://upstream.internal",
 			CookieEncryptionKey: "env:COOKIE_SECRET",
 			Login: config.LoginConfig{
-				Path:          "/session",
-				UsernameField: "user.login",
-				PasswordField: "user.password",
-				Username:      "env:UPSTREAM_USER",
-				Password:      "env:UPSTREAM_PASS",
+				Path:                "/session",
+				UsernameField:       "user.login",
+				PasswordField:       "user.password",
+				PlaceholderUsername: "app",
+				PlaceholderPassword: "app",
+				Username:            "env:UPSTREAM_USER",
+				Password:            "env:UPSTREAM_PASS",
 			},
 		},
 	}})
 
-	req := httptest.NewRequest(http.MethodPost, "http://websudo.local/github/session", strings.NewReader(`{"user":{"login":"fake","password":"wrong"}}`))
+	req := httptest.NewRequest(http.MethodPost, "http://websudo.local/github/session", strings.NewReader(`{"user":{"login":"app","password":"app"}}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	outReq, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
+	require.Nil(t, resp)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(outReq.Body).Decode(&body))
+	require.Equal(t, map[string]any{"login": "boss", "password": "swordfish"}, body["user"])
+}
+
+func TestHandleRequestLoginJSONFieldsCanEscapeLiteralDot(t *testing.T) {
+	t.Setenv("UPSTREAM_USER", "boss")
+	t.Setenv("UPSTREAM_PASS", "swordfish")
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	srv := New(&config.Config{Services: map[string]config.Service{
+		"github": {
+			RoutePrefix:         "/github",
+			BaseURL:             "https://upstream.internal",
+			CookieEncryptionKey: "env:COOKIE_SECRET",
+			Login: config.LoginConfig{
+				Path:                "/session",
+				UsernameField:       `user\.login`,
+				PasswordField:       `user\.password`,
+				PlaceholderUsername: "app",
+				PlaceholderPassword: "app",
+				Username:            "env:UPSTREAM_USER",
+				Password:            "env:UPSTREAM_PASS",
+			},
+		},
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "http://websudo.local/github/session", strings.NewReader(`{"user.login":"app","user.password":"app","user":{"login":"nested","password":"nested"}}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	outReq, resp := srv.handleRequest(req, &goproxy.ProxyCtx{})
@@ -173,7 +238,7 @@ func TestHandleRequestLoginJSONFieldsAreTopLevelKeysOnly(t *testing.T) {
 	require.NoError(t, json.NewDecoder(outReq.Body).Decode(&body))
 	require.Equal(t, "boss", body["user.login"])
 	require.Equal(t, "swordfish", body["user.password"])
-	require.Equal(t, map[string]any{"login": "fake", "password": "wrong"}, body["user"])
+	require.Equal(t, map[string]any{"login": "nested", "password": "nested"}, body["user"])
 }
 
 func TestHandleRequestDecryptsEncryptedCookiesAndLeavesInvalidOnes(t *testing.T) {
