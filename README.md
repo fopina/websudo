@@ -23,6 +23,7 @@ Current v1 scaffold includes:
 - encrypted upstream session-cookie round-tripping for browser-style form and JSON logins
 - encrypted upstream login-token round-tripping for API logins
 - per-placeholder-token variants for the same host or route
+- built-in CA certificate download route for client trust setup
 - unit and e2e tests for credential validation, proxy routing, passthrough, and credential replacement
 
 ## Usage
@@ -42,6 +43,8 @@ Top-level options:
 - `block_unconfigured_destinations`: defaults to `false`; when `true`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
 - `tls.require_existing_ca`: defaults to `false`; when `true`, startup fails if CA files are missing instead of generating a local CA certificate and key for TLS interception
 - `tls.ca_cert_path` and `tls.ca_key_path`: optional CA certificate/key paths; default to `~/.local/share/websudo/ca.pem` and `~/.local/share/websudo/ca-key.pem`
+
+Clients can download the active CA certificate from `http://<websudo-listen-address>/.well-known/websudo/ca.pem`. This built-in route serves only the public certificate, not the CA key, and remains available even when `block_unconfigured_destinations` is enabled.
 
 Path values such as `tls.ca_cert_path`, `tls.ca_key_path`, and `cookie_encryption_key_path` support `~` and `~/...` expansion to the current user's home directory. Relative `cookie_encryption_key_path` values are resolved relative to the config file.
 
