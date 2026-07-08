@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMatchRoutePrefersRoutePrefixOverHostMatch(t *testing.T) {
+func TestMatchRoutePrefersHostMatchOverRoutePrefix(t *testing.T) {
 	srv := New(&config.Config{Services: map[string]config.Service{
 		"forward": {
 			MatchHost:                "api.github.com",
@@ -32,8 +32,8 @@ func TestMatchRoutePrefersRoutePrefixOverHostMatch(t *testing.T) {
 
 	matched, err := srv.matchRoute(req)
 	require.NoError(t, err)
-	require.Equal(t, "reverse", matched.serviceName)
-	require.Equal(t, "/user", matched.path)
+	require.Equal(t, "forward", matched.serviceName)
+	require.Equal(t, "/github/user", matched.path)
 }
 
 func TestMatchRouteUsesVariantInReverseMode(t *testing.T) {

@@ -130,18 +130,22 @@ func listenerPorts(listener net.Listener) []string {
 }
 
 func serviceConfigSummaries(services map[string]config.Service) []string {
-	names := make([]string, 0, len(services))
-	for name := range services {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
+	names := sortedServiceNames(services)
 	summaries := make([]string, 0, len(names))
 	for _, name := range names {
 		svc := services[name]
 		summaries = append(summaries, fmt.Sprintf("%s base_url=%s modes=%s", name, svc.BaseURL, strings.Join(serviceModes(svc), ",")))
 	}
 	return summaries
+}
+
+func sortedServiceNames(services map[string]config.Service) []string {
+	names := make([]string, 0, len(services))
+	for name := range services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func serviceModes(svc config.Service) []string {
@@ -365,20 +369,9 @@ func writeResponse(w http.ResponseWriter, resp *http.Response) {
 }
 
 func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
-	for name, svc := range s.cfg.Services {
-		if svc.RoutePrefix != "" && routePrefixMatches(req.URL.Path, svc.RoutePrefix) {
-			placeholder, err := getAuthValue(req, svc.PlaceholderAuth)
-			if err != nil {
-				return matchedRoute{}, err
-			}
-			effective, variantName := svc.EffectiveService(placeholder)
-			trimmedPath := trimRoutePrefix(req.URL.Path, svc.RoutePrefix)
-			return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: trimmedPath, requestPath: req.URL.Path}, nil
-		}
-	}
-
 	host := req.URL.Hostname()
-	for name, svc := range s.cfg.Services {
+	for _, name := range sortedServiceNames(s.cfg.Services) {
+		svc := s.cfg.Services[name]
 		if svc.MatchHost == "" || !strings.EqualFold(host, svc.MatchHost) {
 			continue
 		}
@@ -389,6 +382,19 @@ func (s *Server) matchRoute(req *http.Request) (matchedRoute, error) {
 		}
 		effective, variantName := svc.EffectiveService(placeholder)
 		return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: req.URL.Path, requestPath: req.URL.Path}, nil
+	}
+
+	for _, name := range sortedServiceNames(s.cfg.Services) {
+		svc := s.cfg.Services[name]
+		if svc.RoutePrefix != "" && routePrefixMatches(req.URL.Path, svc.RoutePrefix) {
+			placeholder, err := getAuthValue(req, svc.PlaceholderAuth)
+			if err != nil {
+				return matchedRoute{}, err
+			}
+			effective, variantName := svc.EffectiveService(placeholder)
+			trimmedPath := trimRoutePrefix(req.URL.Path, svc.RoutePrefix)
+			return matchedRoute{serviceName: name, variantName: variantName, service: effective, path: trimmedPath, requestPath: req.URL.Path}, nil
+		}
 	}
 
 	return matchedRoute{}, fmt.Errorf("%w host %q or path %q", errNoConfiguredService, host, req.URL.Path)
