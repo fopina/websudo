@@ -296,3 +296,79 @@ func TestHeaderLoginEncryptsResponseTokenAndDecryptsRequestToken(t *testing.T) {
 	require.Equal(t, "/profile", outReq.URL.Path)
 	require.Equal(t, "Bearer live_token", outReq.Header.Get("Authorization"))
 }
+
+func TestHeaderLoginEncryptsNestedResponseToken(t *testing.T) {
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	svc := config.Service{
+		AuthMode:            config.AuthModeHeader,
+		PlaceholderAuth:     "Authorization",
+		CookieEncryptionKey: "env:COOKIE_SECRET",
+		Login: config.LoginConfig{
+			Path:       "/session",
+			TokenField: "data.access_token",
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"data":{"access_token":"live_token","refresh_token":"plain"},"token_type":"Bearer"}`)),
+	}
+
+	require.NoError(t, encryptLoginResponseAuthToken(resp, svc))
+
+	var payload map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+	data, ok := payload["data"].(map[string]any)
+	require.True(t, ok)
+	encryptedToken, ok := data["access_token"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, encryptedToken)
+	require.NotEqual(t, "live_token", encryptedToken)
+	require.Equal(t, "plain", data["refresh_token"])
+	require.Equal(t, "Bearer", payload["token_type"])
+
+	key, err := svc.CookieCipherKey()
+	require.NoError(t, err)
+	decrypted, ok := decryptCookieValue(key, "Authorization", encryptedToken)
+	require.True(t, ok)
+	require.Equal(t, "live_token", decrypted)
+}
+
+func TestHeaderLoginTokenFieldCanEscapeLiteralDot(t *testing.T) {
+	t.Setenv("COOKIE_SECRET", "secret-key")
+
+	svc := config.Service{
+		AuthMode:            config.AuthModeHeader,
+		PlaceholderAuth:     "Authorization",
+		CookieEncryptionKey: "env:COOKIE_SECRET",
+		Login: config.LoginConfig{
+			Path:       "/session",
+			TokenField: `data\.access_token`,
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"data.access_token":"live_token","data":{"access_token":"nested_token"}}`)),
+	}
+
+	require.NoError(t, encryptLoginResponseAuthToken(resp, svc))
+
+	var payload map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+	encryptedToken, ok := payload["data.access_token"].(string)
+	require.True(t, ok)
+	require.NotEqual(t, "live_token", encryptedToken)
+	require.Equal(t, map[string]any{"access_token": "nested_token"}, payload["data"])
+
+	key, err := svc.CookieCipherKey()
+	require.NoError(t, err)
+	decrypted, ok := decryptCookieValue(key, "Authorization", encryptedToken)
+	require.True(t, ok)
+	require.Equal(t, "live_token", decrypted)
+}

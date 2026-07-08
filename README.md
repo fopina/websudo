@@ -60,7 +60,7 @@ Header injection fields:
 
 Header login-token fields:
 - `login.path`, `login.username_field`, `login.password_field`, `login.placeholder_username`, `login.placeholder_password`, `login.username`, `login.password`
-- `login.token_field` (optional; defaults to `token`)
+- `login.token_field` (optional; defaults to `token`; accepts `gjson`/`sjson` path syntax such as `data.access_token` or `tokens.0.value`; escape literal dots as `data\\.access_token`)
 - `cookie_encryption_key` (optional explicit secret or `env:...` override for login-token encryption)
 - `cookie_encryption_key_path` (optional override for the persisted login-token secret file; defaults to a generated file next to the config for login services)
 
@@ -192,7 +192,7 @@ services:
 
 Behavior:
 - POST `/api/session` validates the placeholder username/password and rewrites them to the configured upstream credentials
-- the upstream JSON response field named by `login.token_field` is encrypted before returning to the client
+- the upstream JSON response field selected by `login.token_field` is encrypted before returning to the client
 - later requests can send the encrypted value in `Authorization`, for example `Authorization: Bearer wsenc:...`
 - websudo decrypts that header before forwarding upstream, preserving the header prefix
 

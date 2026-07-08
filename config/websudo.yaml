@@ -94,7 +94,7 @@ services:
       path: /api/v2/api-token-auth/
       username_field: username
       password_field: password
-      # token_field defaults to "token"; included here to make the API response contract explicit.
+      # token_field defaults to "token"; nested response fields can use gjson/sjson paths like "data.token".
       token_field: token
       placeholder_username: app
       placeholder_password: app
