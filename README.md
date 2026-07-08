@@ -60,6 +60,7 @@ Header injection fields:
 
 Header login-token fields:
 - `login.path`, `login.username_field`, `login.password_field`, `login.placeholder_username`, `login.placeholder_password`, `login.username`, `login.password`
+- `login.username_field` and `login.password_field` are form field names for `application/x-www-form-urlencoded` login requests; for `application/json` login requests, they accept `gjson`/`sjson` path syntax such as `user.login` or `credentials.password`; escape literal dots as `user\\.login`
 - `login.token_field` (optional; defaults to `token`; accepts `gjson`/`sjson` path syntax such as `data.access_token` or `tokens.0.value`; escape literal dots as `data\\.access_token`)
 - `cookie_encryption_key` (optional explicit secret or `env:...` override for login-token encryption)
 - `cookie_encryption_key_path` (optional override for the persisted login-token secret file; defaults to a generated file next to the config for login services)
@@ -70,6 +71,7 @@ Header login-token services cannot be combined with `inject_auth` or `variants`;
 
 Cookie auth fields:
 - `login.path`, `login.username_field`, `login.password_field`, `login.placeholder_username`, `login.placeholder_password`, `login.username`, `login.password`
+- `login.username_field` and `login.password_field` are form field names for `application/x-www-form-urlencoded` login requests; for `application/json` login requests, they accept `gjson`/`sjson` path syntax such as `user.login` or `credentials.password`; escape literal dots as `user\\.login`
 - `cookie_encryption_key` (optional explicit secret or `env:...` override for login session-cookie encryption)
 - `cookie_encryption_key_path` (optional override for the persisted login cookie secret file; defaults to a generated file next to the config for login services)
 
@@ -158,9 +160,9 @@ services:
 
 Behavior:
 - POST `/app/session` is intentionally exempt from header placeholder-auth gating so the login flow can establish the upstream session, and the rest of the service can rely on the encrypted session cookies instead
-- `username` and `password` form fields, or top-level JSON keys with those names, must match `placeholder_username` and `placeholder_password`
+- `username` and `password` form fields, or JSON fields selected by `login.username_field` and `login.password_field`, must match `placeholder_username` and `placeholder_password`
 - after placeholder credential validation, those fields are replaced with the configured upstream `username` and `password`
-- JSON login bodies must be objects; nested JSON fields are not supported, so configured field names are treated as literal top-level keys
+- JSON login bodies must be objects; `login.username_field` and `login.password_field` support nested `gjson`/`sjson` paths such as `user.login`, while form login bodies keep those settings as literal field names
 - upstream `Set-Cookie` headers are encrypted before they reach the client
 - if `cookie_encryption_key` is omitted, websudo generates and persists a default key file next to the config (or at `cookie_encryption_key_path` if set)
 - later client `Cookie` headers are decrypted before forwarding upstream
@@ -192,7 +194,7 @@ services:
 
 Behavior:
 - POST `/api/session` validates the placeholder username/password and rewrites them to the configured upstream credentials
-- the upstream JSON response field selected by `login.token_field` is encrypted before returning to the client
+- the upstream JSON response field selected by `login.token_field` is encrypted before returning to the client; nested token fields can use `gjson`/`sjson` paths such as `data.access_token`
 - later requests can send the encrypted value in `Authorization`, for example `Authorization: Bearer wsenc:...`
 - websudo decrypts that header before forwarding upstream, preserving the header prefix
 
@@ -207,8 +209,8 @@ Behavior:
 - unconfigured HTTP and HTTPS destinations are blocked when `block_unconfigured_destinations: true`
 - placeholder token variants can select different allowed paths and injected credentials for the same service
 - reverse mode also honors variant-specific path and credential overrides
-- upstream login form fields or top-level JSON keys can be validated against configured placeholder credentials and replaced with configured upstream credentials on a specific login endpoint
-- nested JSON login fields are not supported
+- upstream login form fields or JSON fields selected by `login.username_field` and `login.password_field` can be validated against configured placeholder credentials and replaced with configured upstream credentials on a specific login endpoint
+- nested JSON login fields and nested upstream login response tokens are supported with `gjson`/`sjson` paths
 - upstream Set-Cookie headers can be encrypted and client cookies decrypted on the way back in
 - undecryptable client cookies are intentionally forwarded as-is
 - upstream login response tokens can be encrypted and client auth headers decrypted on the way back in

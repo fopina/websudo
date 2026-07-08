@@ -79,21 +79,32 @@ func rewriteFormLoginRequest(req *http.Request, svc config.Service, body []byte,
 }
 
 func rewriteJSONLoginRequest(req *http.Request, svc config.Service, body []byte, username string, password string) error {
-	var values map[string]any
-	if err := json.Unmarshal(body, &values); err != nil {
+	var parsed json.RawMessage
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		return fmt.Errorf("parse login request JSON body: %w", err)
 	}
-	if values == nil {
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
 		return fmt.Errorf("parse login request JSON body: expected object")
 	}
-	submittedUsername, _ := values[svc.Login.UsernameField].(string)
-	submittedPassword, _ := values[svc.Login.PasswordField].(string)
+	rawUsername := gjson.GetBytes(body, svc.Login.UsernameField)
+	rawPassword := gjson.GetBytes(body, svc.Login.PasswordField)
+	submittedUsername := rawUsername.String()
+	submittedPassword := rawPassword.String()
+	if rawUsername.Type != gjson.String {
+		submittedUsername = ""
+	}
+	if rawPassword.Type != gjson.String {
+		submittedPassword = ""
+	}
 	if err := validateLoginPlaceholderCredentials(svc, submittedUsername, submittedPassword); err != nil {
 		return err
 	}
-	values[svc.Login.UsernameField] = username
-	values[svc.Login.PasswordField] = password
-	encoded, err := json.Marshal(values)
+	encoded, err := sjson.SetBytes(body, svc.Login.UsernameField, username)
+	if err != nil {
+		return fmt.Errorf("encode login request JSON body: %w", err)
+	}
+	encoded, err = sjson.SetBytes(encoded, svc.Login.PasswordField, password)
 	if err != nil {
 		return fmt.Errorf("encode login request JSON body: %w", err)
 	}

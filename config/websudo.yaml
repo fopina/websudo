@@ -90,11 +90,14 @@ services:
     allowed_methods: [GET, POST]
     login:
       # Client login requests should be application/x-www-form-urlencoded with
-      # username and password fields; upstream returns JSON with a "token" key.
+      # username and password fields. JSON login requests can use gjson/sjson
+      # paths in username_field/password_field. Upstream returns JSON with a
+      # "token" key.
       path: /api/v2/api-token-auth/
       username_field: username
       password_field: password
-      # token_field defaults to "token"; nested response fields can use gjson/sjson paths like "data.token".
+      # token_field defaults to "token"; nested response fields can use
+      # gjson/sjson paths like "data.token".
       token_field: token
       placeholder_username: app
       placeholder_password: app
