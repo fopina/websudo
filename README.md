@@ -39,6 +39,8 @@ Each service can define one or both of:
 - `match_host`: for forward proxy requests, matched by requested hostname
 - `route_prefix`: for reverse proxy requests, matched by local path prefix such as `/github`
 
+When a request could match both a `match_host` and a `route_prefix`, `match_host` takes precedence. At startup, websudo rejects overlapping matchers: `match_host` values must be unique case-insensitively, and `route_prefix` values must not overlap on path boundaries such as `/api` and `/api/admin`.
+
 Top-level options:
 - `block_unconfigured_destinations`: defaults to `false`; when `true`, requests for destinations that do not match any configured service are rejected for both plain HTTP requests and HTTPS CONNECT
 - `tls.require_existing_ca`: defaults to `false`; when `true`, startup fails if CA files are missing instead of generating a local CA certificate and key for TLS interception

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -104,6 +105,9 @@ func Load(path string) (*Config, error) {
 		}
 		cfg.Services[name] = normalized
 	}
+	if err := validateServiceMatchers(cfg.Services); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
 }
@@ -165,6 +169,9 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 	}
 	if svc.RoutePrefix != "" && !strings.HasPrefix(svc.RoutePrefix, "/") {
 		svc.RoutePrefix = "/" + svc.RoutePrefix
+	}
+	if svc.RoutePrefix != "" {
+		svc.RoutePrefix = normalizedRoutePrefix(svc.RoutePrefix)
 	}
 	if svc.CookieEncryptionKeyPath != "" {
 		svc.CookieEncryptionKeyPath = expandHomePath(svc.CookieEncryptionKeyPath)
@@ -233,6 +240,64 @@ func normalizeService(name string, svc Service, configDir string) (Service, erro
 	}
 
 	return svc, nil
+}
+
+func validateServiceMatchers(services map[string]Service) error {
+	names := make([]string, 0, len(services))
+	for name := range services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	hosts := make(map[string]string)
+	type routePrefix struct {
+		serviceName string
+		value       string
+	}
+	routePrefixes := make([]routePrefix, 0, len(services))
+
+	for _, name := range names {
+		svc := services[name]
+		if svc.MatchHost != "" {
+			key := strings.ToLower(svc.MatchHost)
+			if previous, ok := hosts[key]; ok {
+				return fmt.Errorf("services %q and %q have overlapping match_host %q", previous, name, svc.MatchHost)
+			}
+			hosts[key] = name
+		}
+		if svc.RoutePrefix != "" {
+			routePrefixes = append(routePrefixes, routePrefix{serviceName: name, value: normalizedRoutePrefix(svc.RoutePrefix)})
+		}
+	}
+
+	for i, left := range routePrefixes {
+		for _, right := range routePrefixes[i+1:] {
+			if routePrefixesOverlap(left.value, right.value) {
+				return fmt.Errorf("services %q and %q have overlapping route_prefix values %q and %q", left.serviceName, right.serviceName, left.value, right.value)
+			}
+		}
+	}
+
+	return nil
+}
+
+func routePrefixesOverlap(left string, right string) bool {
+	return routePrefixContains(left, right) || routePrefixContains(right, left)
+}
+
+func routePrefixContains(parent string, child string) bool {
+	return parent == "/" || child == parent || strings.HasPrefix(child, parent+"/")
+}
+
+func normalizedRoutePrefix(routePrefix string) string {
+	if routePrefix == "/" {
+		return routePrefix
+	}
+	trimmed := strings.TrimRight(routePrefix, "/")
+	if trimmed == "" {
+		return "/"
+	}
+	return trimmed
 }
 
 func validateHeaderAuthMode(name string, svc Service) error {
