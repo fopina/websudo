@@ -6,7 +6,7 @@ require (
 	github.com/elazarl/goproxy v1.8.4
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	github.com/tidwall/gjson v1.18.0
+	github.com/tidwall/gjson v1.19.0
 	github.com/tidwall/sjson v1.2.5
 	gopkg.in/yaml.v3 v3.0.1
 )
